@@ -14,7 +14,6 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() in ("1", "true", "yes")
 
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS","localhost,127.0.0.1,backend-django-5ssb.onrender.com").split(",")
 
-
 # ----------------------------
 # Installed Apps
 # ----------------------------
