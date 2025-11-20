@@ -397,6 +397,12 @@ class Notification(models.Model):
         ('table', 'Table'),
     ]
     
+    PRIORITY_CHOICES = [
+        ('critical', 'Critical'),  # Real-time + sound
+        ('medium', 'Medium'),      # Real-time only (no sound)
+        ('low', 'Low'),            # Daily digest (no real-time)
+    ]
+    
     user = models.ForeignKey(
         CustomUser,
         on_delete=models.CASCADE,
@@ -416,6 +422,12 @@ class Notification(models.Model):
         max_length=20,
         choices=TYPE_CHOICES,
         default='info'
+    )
+    priority = models.CharField(
+        max_length=20,
+        choices=PRIORITY_CHOICES,
+        default='medium',
+        help_text="Notification priority: critical (sound+real-time), medium (real-time only), low (daily digest)"
     )
     title = models.CharField(max_length=200)
     message = models.TextField()

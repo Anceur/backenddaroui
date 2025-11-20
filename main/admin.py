@@ -2,7 +2,7 @@ from django.contrib import admin
 from .models import (
     CustomUser, Profile, MenuItem, MenuItemSize, Order, OrderItem, 
     Ingredient, MenuItemIngredient, MenuItemSizeIngredient, IngredientStock, 
-    IngredientTrace, Table, OfflineOrder, OfflineOrderItem, TableSession
+    IngredientTrace, Table, OfflineOrder, OfflineOrderItem, TableSession,Notification,
 )
 
 # Register your models here.
@@ -21,3 +21,4 @@ admin.site.register(Table)
 admin.site.register(OfflineOrder)
 admin.site.register(OfflineOrderItem)
 admin.site.register(TableSession)
+admin.site.register(Notification)

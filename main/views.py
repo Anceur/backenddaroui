@@ -24,10 +24,12 @@ from django.db.models.functions import TruncDate, TruncHour
 from datetime import datetime, timedelta
 from django.utils import timezone
 from django.core.cache import cache
-from django.conf import settings
+from django.conf import settings as django_settings
+from decimal import Decimal
 import secrets
 import hashlib
 import logging
+from .notification_utils import notify_order_confirmed_by_cashier
 
 logger = logging.getLogger(__name__)
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -49,19 +51,23 @@ class CustomTokenObtainPairView(TokenObtainPairView):
         }, status=status.HTTP_200_OK)
 
         # Set cookies
+        # For development (localhost), use secure=False
+        # For production, use secure=True
+        is_secure = not django_settings.DEBUG  # Only secure in production
+        
         response.set_cookie(
             "access_token",
             str(access_token),
             httponly=True,
-            samesite="None",   # allow cross-site cookies
-            secure=True,     # required when SameSite=None
+            samesite="Lax" if django_settings.DEBUG else "None",  # Lax for localhost, None for cross-site
+            secure=is_secure,
         )
         response.set_cookie(
             "refresh_token",
             str(refresh_token),
             httponly=True,
-            samesite="None",
-            secure=True,
+            samesite="Lax" if django_settings.DEBUG else "None",
+            secure=is_secure,
         )
 
 
@@ -1865,22 +1871,10 @@ class PublicTableValidateView(APIView):
             try:
                 table = Table.objects.get(number=str(table_number))
                 
-                # Check if table is occupied
-                # Table is occupied if:
-                # 1. is_available is False, OR
-                # 2. Has active orders (Pending, Preparing, Ready), OR
-                # 3. Has active table sessions
-                has_active_orders = OfflineOrder.objects.filter(
-                    table=table,
-                    status__in=['Pending', 'Preparing', 'Ready']
-                ).exists()
-                
-                has_active_sessions = TableSession.objects.filter(
-                    table=table,
-                    is_active=True
-                ).exists()
-                
-                is_occupied = not table.is_available or has_active_orders or has_active_sessions
+                # Use is_available as the primary source of truth
+                # is_occupied is simply the inverse of is_available
+                # Cashier has full control over table availability
+                is_occupied = not table.is_available
                 
                 return Response({
                     'exists': True,
@@ -2635,43 +2629,32 @@ class CashierTablesStatusView(APIView):
     permission_classes = [IsAuthenticated, IsCashier]
     
     def get(self, request):
-        """Get all tables with occupancy status"""
+        """Get all tables with occupancy status - uses is_available field as primary source"""
         try:
             tables = Table.objects.all().order_by('number')
             
-            # Get active sessions for each table
-            active_sessions = TableSession.objects.filter(
-                is_active=True
-            ).select_related('table')
-            
-            # Create a set of occupied table IDs
-            occupied_table_ids = set(session.table.id for session in active_sessions if session.is_valid())
-            
-            # Build response with table status
+            # Build response with table status - use is_available from database as primary source
             tables_data = []
             for table in tables:
-                is_occupied = table.id in occupied_table_ids
-                # Also check if table has active offline orders
-                has_active_order = OfflineOrder.objects.filter(
-                    table=table,
-                    status__in=['Pending', 'Preparing', 'Ready']
-                ).exists()
+                # is_available is the primary source of truth from database
+                # is_occupied is the inverse of is_available
+                is_occupied = not table.is_available
                 
                 tables_data.append({
                     'id': table.id,
                     'number': table.number,
                     'capacity': table.capacity,
                     'location': table.location,
-                    'is_available': table.is_available and not is_occupied and not has_active_order,
-                    'is_occupied': is_occupied or has_active_order,
+                    'is_available': table.is_available,  # Primary source from database
+                    'is_occupied': is_occupied,  # Inverse of is_available
                     'notes': table.notes,
                 })
             
             return Response({
                 'tables': tables_data,
                 'total': len(tables_data),
-                'occupied': sum(1 for t in tables_data if t['is_occupied']),
-                'available': sum(1 for t in tables_data if not t['is_occupied'])
+                'occupied': sum(1 for t in tables_data if not t['is_available']),
+                'available': sum(1 for t in tables_data if t['is_available'])
             }, status=status.HTTP_200_OK)
             
         except Exception as e:
@@ -2762,6 +2745,21 @@ class CashierConfirmOrderView(APIView):
                     
                     logger.info(f"Order {order.id} confirmed by cashier")
                     
+                    # Notify chefs that order has been confirmed and is ready to prepare
+                    print(f"NOTIFICATION: About to call notify_order_confirmed_by_cashier for order {order.id}")
+                    logger.info(f"NOTIFICATION: About to call notify_order_confirmed_by_cashier for order {order.id}")
+                    try:
+                        result = notify_order_confirmed_by_cashier(order, order_type='online')
+                        logger.info(f"NOTIFICATION: Function returned {len(result) if result else 0} notifications")
+                        if not result:
+                            logger.warning(f"NOTIFICATION: WARNING - No notifications were created for order {order.id}")
+                        else:
+                            logger.info(f"NOTIFICATION: SUCCESS - Created notifications: {[n.id for n in result]}")
+                    except Exception as e:
+                        logger.error(f"NOTIFICATION: ERROR calling notify_order_confirmed_by_cashier for order {order.id}: {e}", exc_info=True)
+                        import traceback
+                        logger.error(f"NOTIFICATION: Full traceback: {traceback.format_exc()}")
+                    
                     # Build order data manually - avoid using serializer to prevent ID validation issues
                     # Format ID as string with # prefix for display
                     order_data = {
@@ -2804,7 +2802,7 @@ class CashierConfirmOrderView(APIView):
                     return Response({
                         'error': 'Failed to confirm order',
                         'detail': str(e),
-                        'traceback': error_trace if settings.DEBUG else None
+                        'traceback': error_trace if django_settings.DEBUG else None
                     }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                     
             elif order_type == 'offline':
@@ -2818,6 +2816,22 @@ class CashierConfirmOrderView(APIView):
                     
                     offline_order.is_confirmed_cashier = True
                     offline_order.save(update_fields=['is_confirmed_cashier'])
+                    
+                    logger.info(f"Offline order {offline_order.id} confirmed by cashier")
+                    
+                    # Notify chefs that order has been confirmed and is ready to prepare
+                    logger.info(f"NOTIFICATION: About to call notify_order_confirmed_by_cashier for offline order {offline_order.id}")
+                    try:
+                        result = notify_order_confirmed_by_cashier(offline_order, order_type='offline')
+                        logger.info(f"NOTIFICATION: Function returned {len(result) if result else 0} notifications")
+                        if not result:
+                            logger.warning(f"NOTIFICATION: WARNING - No notifications were created for offline order {offline_order.id}")
+                        else:
+                            logger.info(f"NOTIFICATION: SUCCESS - Created notifications: {[n.id for n in result]}")
+                    except Exception as e:
+                        logger.error(f"NOTIFICATION: ERROR calling notify_order_confirmed_by_cashier for offline order {offline_order.id}: {e}", exc_info=True)
+                        import traceback
+                        logger.error(f"NOTIFICATION: Full traceback: {traceback.format_exc()}")
                     
                     serializer = OfflineOrderSerializer(offline_order)
                     return Response({
@@ -2917,6 +2931,141 @@ class CashierOrderDetailView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+class CashierCreateOfflineOrderView(APIView):
+    """Cashier endpoint for manually creating offline orders for tables"""
+    permission_classes = [IsAuthenticated, IsCashier]
+    
+    def post(self, request):
+        """Create a new offline order manually by cashier"""
+        try:
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            # Get table ID from request
+            table_id = request.data.get('table_id')
+            if not table_id:
+                return Response({
+                    'error': 'Missing required field',
+                    'details': 'table_id is required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get table
+            try:
+                table = Table.objects.get(id=table_id)
+            except Table.DoesNotExist:
+                return Response({
+                    'error': 'Table not found',
+                    'details': f'Table with ID {table_id} does not exist'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Get items from request
+            items = request.data.get('items', [])
+            if not items or len(items) == 0:
+                return Response({
+                    'error': 'Validation failed',
+                    'details': 'At least one item is required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Calculate total
+            total = Decimal('0.00')
+            created_count = 0
+            failed_count = 0
+            
+            # Create offline order
+            offline_order = OfflineOrder.objects.create(
+                table=table,
+                status='Pending',
+                is_confirmed_cashier=False,
+                total=Decimal('0.00')  # Will be calculated
+            )
+            
+            # Create offline order items
+            for item_data in items:
+                try:
+                    item_id = item_data.get('item_id')
+                    size_id = item_data.get('size_id')  # Can be null
+                    quantity = int(item_data.get('quantity', 1))
+                    
+                    if not item_id:
+                        failed_count += 1
+                        logger.warning(f"Missing item_id in order item data: {item_data}")
+                        continue
+                    
+                    # Get menu item
+                    try:
+                        menu_item = MenuItem.objects.get(id=item_id)
+                    except MenuItem.DoesNotExist:
+                        failed_count += 1
+                        logger.warning(f"Menu item {item_id} not found")
+                        continue
+                    
+                    # Get size if provided
+                    menu_item_size = None
+                    item_price = menu_item.price  # Default to menu item price
+                    
+                    if size_id:
+                        try:
+                            menu_item_size = MenuItemSize.objects.get(id=size_id, menu_item=menu_item)
+                            item_price = menu_item_size.price
+                        except MenuItemSize.DoesNotExist:
+                            logger.warning(f"Menu item size {size_id} not found for item {item_id}")
+                            # Continue with menu item price
+                    
+                    # Calculate item total
+                    item_total = Decimal(str(item_price)) * Decimal(str(quantity))
+                    total += item_total
+                    
+                    # Create offline order item (price is required field)
+                    OfflineOrderItem.objects.create(
+                        offline_order=offline_order,
+                        item=menu_item,
+                        size=menu_item_size,
+                        quantity=quantity,
+                        price=Decimal(str(item_price))  # Store price at time of order
+                    )
+                    created_count += 1
+                    
+                except Exception as e:
+                    failed_count += 1
+                    logger.error(f"Error creating offline order item: {e}", exc_info=True)
+            
+            # Update order total
+            offline_order.total = total
+            offline_order.save(update_fields=['total'])
+            
+            logger.info(f"Cashier created OfflineOrder #{offline_order.id}: {created_count} items created, {failed_count} failed")
+            
+            # Mark table as occupied when order is created
+            if table.is_available:
+                table.is_available = False
+                table.save(update_fields=['is_available'])
+                logger.info(f"Table {table.number} marked as occupied (is_available=False) due to order #{offline_order.id}")
+            
+            # Refresh from database to ensure all relationships are loaded
+            offline_order.refresh_from_db()
+            
+            # Prefetch related items for serialization
+            offline_order = OfflineOrder.objects.prefetch_related('items__item', 'items__size').get(id=offline_order.id)
+            
+            # Serialize and return
+            serializer = OfflineOrderSerializer(offline_order)
+            return Response({
+                'success': True,
+                'message': 'Offline order created successfully',
+                'order': serializer.data
+            }, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            logger.error(f"Error creating cashier offline order: {e}\n{error_trace}")
+            return Response({
+                'error': 'Failed to create offline order',
+                'detail': str(e),
+                'traceback': error_trace if django_settings.DEBUG else None
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 class CashierTableOccupancyView(APIView):
     """Cashier can manually occupy or unoccupy tables"""
     permission_classes = [IsAuthenticated, IsCashier]
@@ -2933,49 +3082,14 @@ class CashierTableOccupancyView(APIView):
                     'details': {'is_occupied': ['is_occupied field is required']}
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # Check if table has active orders when trying to unoccupy
-            # IMPORTANT: Only prevent unoccupying if there are orders that are still being processed
-            # Allow unoccupying if ALL orders are Served, Paid, or Canceled (completed orders)
-            # This means: if chef completes order (status = 'Served'), cashier CAN unoccupy the table
+            # Ensure is_occupied is a boolean (handle string "true"/"false" from frontend)
+            if isinstance(is_occupied, str):
+                is_occupied = is_occupied.lower() in ('true', '1', 'yes')
+            is_occupied = bool(is_occupied)
+            
+            # Cashier can freely mark tables as available/occupied without validation
+            # Deactivate any active sessions when marking table as available
             if not is_occupied:
-                # Check for orders that are still being processed (not completed)
-                # Only these statuses prevent unoccupying: Pending, Preparing, Ready
-                # Statuses that ALLOW unoccupying: Served, Paid, Canceled
-                active_orders = OfflineOrder.objects.filter(
-                    table=table,
-                    status__in=['Pending', 'Preparing', 'Ready']
-                )
-                
-                if active_orders.exists():
-                    active_order_ids = list(active_orders.values_list('id', flat=True))
-                    active_statuses = list(active_orders.values_list('status', flat=True).distinct())
-                    logger.warning(
-                        f"Cannot unoccupy table {table.number}: "
-                        f"Has {active_orders.count()} active orders (IDs: {active_order_ids}, Statuses: {active_statuses})"
-                    )
-                    return Response({
-                        'error': 'Cannot unoccupy table',
-                        'details': f'Table has {active_orders.count()} active order(s) with status: {", ".join(active_statuses)}. Please wait for orders to be completed (Served/Paid) or cancel them first.'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-                
-                # Check for completed orders (for logging)
-                # These orders DO NOT prevent unoccupying
-                completed_orders = OfflineOrder.objects.filter(
-                    table=table,
-                    status__in=['Served', 'Paid', 'Canceled']
-                )
-                if completed_orders.exists():
-                    logger.info(
-                        f"✅ Allowing unoccupy for table {table.number}: "
-                        f"Has {completed_orders.count()} completed order(s) (Served/Paid/Canceled), no active orders"
-                    )
-                else:
-                    logger.info(
-                        f"✅ Allowing unoccupy for table {table.number}: "
-                        f"No orders found for this table"
-                    )
-                
-                # Also deactivate any active sessions
                 sessions_deactivated = TableSession.objects.filter(
                     table=table,
                     is_active=True
@@ -2984,9 +3098,38 @@ class CashierTableOccupancyView(APIView):
                 if sessions_deactivated > 0:
                     logger.info(f"Deactivated {sessions_deactivated} active session(s) for table {table.number}")
             
+            # Update is_available field in database
+            # When is_occupied is False, table should be available (is_available = True)
+            # When is_occupied is True, table should not be available (is_available = False)
+            old_is_available = table.is_available
             table.is_available = not is_occupied
-            table.save(update_fields=['is_available'])
-            logger.info(f"Table {table.number} is now {'occupied' if is_occupied else 'available'}")
+            
+            # Save the change to database - use save() without update_fields to ensure it's saved
+            table.save()
+            
+            # Refresh from database to verify the change was saved
+            table.refresh_from_db()
+            
+            # Verify the change was actually saved
+            if table.is_available != (not is_occupied):
+                logger.error(
+                    f"❌ ERROR: Table {table.number} is_available was not saved correctly! "
+                    f"Expected: {not is_occupied}, Got: {table.is_available}"
+                )
+                # Try saving again without update_fields
+                table.is_available = not is_occupied
+                table.save()
+                table.refresh_from_db()
+            
+            logger.info(
+                f"✅ Table {table.number} updated: "
+                f"is_occupied={is_occupied}, is_available changed from {old_is_available} to {table.is_available} (saved to database)"
+            )
+            
+            # Notify admin about table status change (medium priority - real-time, no sound)
+            from .notification_utils import notify_table_change
+            change_type = 'occupied' if is_occupied else 'free'
+            notify_table_change(table, change_type=change_type)
             
             serializer = TableSerializer(table)
             return Response({

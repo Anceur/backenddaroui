@@ -8,7 +8,7 @@ from .views import (
     TableListCreateView, TableDetailView, PublicTableValidateView, DashboardStatsView, AnalyticsView, CustomersListView,
     TableSessionGenerateView, TableSessionValidateView, TableSessionListView, TableSessionDetailView,
     CashierTablesStatusView, CashierPendingOrdersView, CashierConfirmOrderView, CashierOrderDetailView,
-    CashierTableOccupancyView
+    CashierTableOccupancyView, CashierCreateOfflineOrderView
 )
 from .views import (
     MenuItemListCreateView, MenuItemDetailView, PublicMenuItemListView,
@@ -27,6 +27,7 @@ from .views_notifications import (
     NotificationMarkReadView, NotificationMarkAllReadView,
     NotificationDetailView
 )
+from .views_websocket import WebSocketTokenView
 
 urlpatterns = [
     # Authentication endpoints
@@ -72,6 +73,7 @@ urlpatterns = [
     path('cashier/pending-orders/', CashierPendingOrdersView.as_view(), name='cashier_pending_orders'),
     path('cashier/confirm-order/', CashierConfirmOrderView.as_view(), name='cashier_confirm_order'),
     path('cashier/order-detail/', CashierOrderDetailView.as_view(), name='cashier_order_detail'),
+    path('cashier/create-order/', CashierCreateOfflineOrderView.as_view(), name='cashier_create_order'),
     path('cashier/tables/<int:table_id>/occupancy/', CashierTableOccupancyView.as_view(), name='cashier_table_occupancy'),
     
     # Dashboard and Analytics endpoints
@@ -118,4 +120,7 @@ urlpatterns = [
     path('notifications/mark-read/', NotificationMarkReadView.as_view(), name='notification_mark_read'),
     path('notifications/mark-all-read/', NotificationMarkAllReadView.as_view(), name='notification_mark_all_read'),
     path('notifications/<int:notification_id>/', NotificationDetailView.as_view(), name='notification_detail'),
+    
+    # WebSocket token endpoint
+    path('websocket-token/', WebSocketTokenView.as_view(), name='websocket_token'),
 ]

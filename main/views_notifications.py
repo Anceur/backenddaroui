@@ -20,10 +20,16 @@ class NotificationListView(APIView):
             user = request.user
             unread_only = request.query_params.get('unread_only', 'false').lower() == 'true'
             limit = request.query_params.get('limit', None)
+            all_notifications = request.query_params.get('all', 'false').lower() == 'true'
             
-            queryset = Notification.objects.filter(
-                Q(user=user) | Q(role=user.roles, user__isnull=True)
-            )
+            # If admin requests all notifications, return all (for admin notifications page)
+            if all_notifications and user.roles == 'admin':
+                queryset = Notification.objects.filter(role='admin')
+            else:
+                # Otherwise, return only user's notifications
+                queryset = Notification.objects.filter(
+                    Q(user=user) | Q(role=user.roles, user__isnull=True)
+                )
             
             if unread_only:
                 queryset = queryset.filter(is_read=False)

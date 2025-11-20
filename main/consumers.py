@@ -16,53 +16,73 @@ class NotificationConsumer(AsyncWebsocketConsumer):
     
     async def connect(self):
         """Handle WebSocket connection"""
-        # Get token from query string or cookies
+        import logging
+        logger = logging.getLogger(__name__)
+        
         self.user = None
         self.user_role = None
         self.room_group_name = None
         
-        # Try to get token from query string
-        query_string = self.scope.get('query_string', b'').decode()
-        token = None
+        # Get user from scope (set by JWTAuthMiddleware)
+        user = self.scope.get('user')
         
-        # Parse query string for token
-        if 'token=' in query_string:
-            token = query_string.split('token=')[1].split('&')[0]
+        # If user is authenticated via middleware, use that
+        if user and hasattr(user, 'is_authenticated') and user.is_authenticated:
+            self.user = user
+            self.user_role = user.roles
+            logger.info(f"WebSocket: Authenticated user {user.username} (role: {user.roles})")
         else:
-            # Try to get from cookies
-            cookies = self.scope.get('cookies', {})
-            token = cookies.get('access_token')
+            # Fallback: Try JWT token from query string (if middleware didn't work)
+            query_string = self.scope.get('query_string', b'').decode()
+            token = None
+            
+            # Parse query string for token
+            if 'token=' in query_string:
+                # Extract and URL decode token
+                from urllib.parse import unquote
+                token_part = query_string.split('token=')[1].split('&')[0]
+                token = unquote(token_part)
+                logger.info(f"WebSocket: Trying token from query string (length: {len(token)})")
+                
+                if token:
+                    try:
+                        # Validate token
+                        user = await self.get_user_from_token(token)
+                        if user:
+                            self.user = user
+                            self.user_role = user.roles
+                            logger.info(f"WebSocket: Authenticated via query token - user {user.username} (role: {user.roles})")
+                        else:
+                            logger.warning(f"WebSocket: Query token validation failed - token invalid or expired")
+                    except Exception as e:
+                        logger.error(f"WebSocket: Query token validation error: {e}", exc_info=True)
+            else:
+                logger.warning(f"WebSocket: No user found in scope and no token in query string. Query string: {query_string[:100]}")
         
-        if token:
-            try:
-                # Validate token
-                user = await self.get_user_from_token(token)
-                if user:
-                    self.user = user
-                    self.user_role = user.roles
-                    # Create room group name based on user and role
-                    self.room_group_name = f"notifications_{user.id}_{user.roles}"
-                    
-                    # Join room group
-                    await self.channel_layer.group_add(
-                        self.room_group_name,
-                        self.channel_name
-                    )
-                    
-                    # Also join role-based group
-                    role_group_name = f"notifications_role_{user.roles}"
-                    await self.channel_layer.group_add(
-                        role_group_name,
-                        self.channel_name
-                    )
-                    
-                    await self.accept()
-                    return
-            except Exception:
-                # If token validation fails, reject connection
-                pass
+        # If we have a user, accept connection
+        if self.user and self.user_role:
+            # Create room group name based on user and role
+            self.room_group_name = f"notifications_{self.user.id}_{self.user_role}"
+            
+            # Join room group
+            await self.channel_layer.group_add(
+                self.room_group_name,
+                self.channel_name
+            )
+            
+            # Also join role-based group
+            role_group_name = f"notifications_role_{self.user_role}"
+            await self.channel_layer.group_add(
+                role_group_name,
+                self.channel_name
+            )
+            
+            await self.accept()
+            logger.info(f"WebSocket: Connection accepted for user {self.user.username}")
+            return
         
-        # If no valid token, reject connection
+        # If no valid authentication, reject connection
+        logger.warning(f"WebSocket: Rejecting connection - authentication failed")
         await self.close()
     
     async def disconnect(self, close_code):
@@ -122,18 +142,25 @@ class NotificationConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def get_user_from_token(self, token):
         """Get user from JWT token"""
+        import logging
+        logger = logging.getLogger(__name__)
         try:
-            # Decode token
-            UntypedToken(token)
-            decoded_data = jwt_decode(token, settings.SECRET_KEY, algorithms=["HS256"])
-            user_id = decoded_data.get('user_id')
+            # Validate token using rest_framework_simplejwt
+            # This uses the correct signing key from SIMPLE_JWT settings
+            from rest_framework_simplejwt.tokens import AccessToken
+            access_token = AccessToken(token)
+            user_id = access_token.get('user_id')
             
             if user_id:
                 try:
                     return User.objects.get(id=user_id)
                 except User.DoesNotExist:
                     return None
-        except (InvalidToken, TokenError, Exception) as e:
+        except (InvalidToken, TokenError) as e:
+            logger.warning(f"Consumer: Token validation failed: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Consumer: Unexpected error validating token: {e}", exc_info=True)
             return None
         return None
     

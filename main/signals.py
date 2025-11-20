@@ -6,7 +6,11 @@ from django.dispatch import receiver
 from django.db import transaction
 from decimal import Decimal
 from .models import Order, OrderItem, IngredientStock, IngredientTrace, MenuItemSizeIngredient, MenuItemIngredient, OfflineOrder, OfflineOrderItem, Ingredient
-from .notification_utils import notify_new_order, notify_order_status_change, notify_low_stock, notify_offline_order
+from .notification_utils import (
+    notify_new_order, notify_order_status_change, notify_low_stock, notify_offline_order,
+    notify_chef_prepared_order, notify_table_change, notify_ingredient_trace_created,
+    notify_inventory_received, notify_unauthorized_attempt
+)
 
 
 @receiver(post_save, sender=Order)
@@ -146,7 +150,7 @@ def handle_order_status_ready(sender, instance, created, **kwargs):
                 ingredient.save(update_fields=['stock'])
                 
                 # Create trace record
-                IngredientTrace.objects.create(
+                trace = IngredientTrace.objects.create(
                     ingredient=ingredient,
                     order=instance,
                     quantity_used=quantity_used,
@@ -154,6 +158,8 @@ def handle_order_status_ready(sender, instance, created, **kwargs):
                     stock_before=stock_before,
                     stock_after=stock_after
                 )
+                # Notify admin about ingredient trace creation (medium priority)
+                notify_ingredient_trace_created(trace)
                 processed_count += 1
         
         # Log processing results
@@ -172,6 +178,10 @@ def handle_order_status_ready(sender, instance, created, **kwargs):
     
     # Send notification for status changes
     if hasattr(instance, '_status_changed') and instance._status_changed:
+        old_status = getattr(instance, '_old_status', None)
+        # Notify admin when chef starts preparing (status changes to Preparing)
+        if instance.status == 'Preparing' and old_status != 'Preparing':
+            notify_chef_prepared_order(instance, order_type='online')
         notify_order_status_change(instance)
 
 
@@ -307,7 +317,7 @@ def handle_offline_order_status_ready(sender, instance, created, **kwargs):
                 ingredient.save(update_fields=['stock'])
                 
                 # Create trace record
-                IngredientTrace.objects.create(
+                trace = IngredientTrace.objects.create(
                     ingredient=ingredient,
                     offline_order=instance,
                     quantity_used=quantity_used,
@@ -315,6 +325,8 @@ def handle_offline_order_status_ready(sender, instance, created, **kwargs):
                     stock_before=stock_before,
                     stock_after=stock_after
                 )
+                # Notify admin about ingredient trace creation (medium priority)
+                notify_ingredient_trace_created(trace)
                 processed_count += 1
         
         # Log processing results
@@ -333,12 +345,28 @@ def handle_offline_order_status_ready(sender, instance, created, **kwargs):
     
     # Send notification for status changes
     if hasattr(instance, '_status_changed') and instance._status_changed:
+        old_status = getattr(instance, '_old_status', None)
+        # Notify admin when chef starts preparing (status changes to Preparing)
+        if instance.status == 'Preparing' and old_status != 'Preparing':
+            notify_chef_prepared_order(instance, order_type='offline')
         notify_order_status_change(instance)
 
 
 @receiver(post_save, sender=Ingredient)
 def handle_ingredient_stock_check(sender, instance, created, **kwargs):
     """Check for low stock and send notifications"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Check if stock is low
     if instance.is_low_stock:
-        notify_low_stock(instance)
+        logger.info(f"Ingredient {instance.name} has low stock: {instance.stock} {instance.unit} (reorder level: {instance.reorder_level} {instance.unit})")
+        logger.info(f"Calling notify_low_stock for ingredient {instance.id}")
+        try:
+            notify_low_stock(instance)
+            logger.info(f"Successfully called notify_low_stock for ingredient {instance.id}")
+        except Exception as e:
+            logger.error(f"Error in notify_low_stock for ingredient {instance.id}: {e}", exc_info=True)
+    else:
+        logger.debug(f"Ingredient {instance.name} stock check: stock={instance.stock}, reorder_level={instance.reorder_level}, is_low={instance.is_low_stock}")
 
