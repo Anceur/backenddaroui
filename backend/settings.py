@@ -3,20 +3,25 @@ from pathlib import Path
 from datetime import timedelta
 import dj_database_url
 
-# Base directory
+# ==========================
+# BASE DIR
+# ==========================
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# ----------------------------
-# Security & Debug
-# ----------------------------
+# ==========================
+# SECURITY
+# ==========================
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "unsafe-secret")
 DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() in ("1", "true", "yes")
 
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS","localhost,127.0.0.1,backend-django-5ssb.onrender.com").split(",")
+ALLOWED_HOSTS = os.environ.get(
+    "ALLOWED_HOSTS",
+    "localhost,127.0.0.1,backend-django-5ssb.onrender.com"
+).split(",")
 
-# ----------------------------
-# Installed Apps
-# ----------------------------
+# ==========================
+# INSTALLED APPS
+# ==========================
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -24,39 +29,46 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+
     "main",
+
     "rest_framework",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
+
     "corsheaders",
     "channels",
 ]
 
-# ----------------------------
-# Middleware
-# ----------------------------
+# ==========================
+# MIDDLEWARE
+# ==========================
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
-    "whitenoise.middleware.WhiteNoiseMiddleware", 
+    "whitenoise.middleware.WhiteNoiseMiddleware",
+
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+
     "main.middleware.RefreshTokenMiddleware",
+
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-# ----------------------------
-# URL & WSGI / ASGI
-# ----------------------------
+# ==========================
+# URL / WSGI / ASGI
+# ==========================
 ROOT_URLCONF = "backend.urls"
 WSGI_APPLICATION = "backend.wsgi.application"
-ASGI_APPLICATION = "backend.asgi.application"  # Channels
+ASGI_APPLICATION = "backend.asgi.application"
 
-# ----------------------------
-# Templates
-# ----------------------------
+# ==========================
+# TEMPLATES
+# ==========================
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
@@ -73,20 +85,32 @@ TEMPLATES = [
     },
 ]
 
-# ----------------------------
-# Database (PostgreSQL on Render)
-# ----------------------------
+# ==========================
+# CUSTOM COOKIE NAMES (Frontend Admin)
+# ==========================
+SESSION_COOKIE_NAME = "admin_session"
+CSRF_COOKIE_NAME = "admin_csrftoken"
+
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+
+# ==========================
+# DATABASE (Render PostgreSQL)
+# ==========================
 DATABASES = {
     "default": dj_database_url.config(
-        default=os.environ.get("DATABASE_URL"),  # بدون fallback للـ SQLite
+        default=os.environ.get("DATABASE_URL"),
         conn_max_age=600,
-        ssl_require=True
+        ssl_require=True,
     )
 }
 
-# ----------------------------
-# Channels / WebSocket (Redis)
-# ----------------------------
+# ==========================
+# CHANNELS + REDIS
+# ==========================
 REDIS_URL = os.environ.get("REDIS_URL")
 
 if REDIS_URL:
@@ -96,19 +120,18 @@ if REDIS_URL:
             "CONFIG": {
                 "hosts": [REDIS_URL],
             },
-        },
+        }
     }
 else:
-    # Local development fallback
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels.layers.InMemoryChannelLayer",
         }
     }
 
-# ----------------------------
-# Django REST Framework
-# ----------------------------
+# ==========================
+# REST FRAMEWORK
+# ==========================
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",
@@ -119,30 +142,34 @@ REST_FRAMEWORK = {
     ),
 }
 
-# ----------------------------
-# JWT Settings
-# ----------------------------
+# ==========================
+# SIMPLE JWT
+# ==========================
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
-    "ROTATE_REFRESH_TOKENS": False,
-    "BLACKLIST_AFTER_ROTATION": False,
+
+    # IMPORTANT !!!
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+
     "UPDATE_LAST_LOGIN": False,
     "ALGORITHM": "HS256",
     "SIGNING_KEY": SECRET_KEY,
     "AUTH_HEADER_TYPES": ("Bearer",),
-    "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
-    "TOKEN_TYPE_CLAIM": "token_type",
+    "AUTH_TOKEN_CLASSES": (
+        "rest_framework_simplejwt.tokens.AccessToken",
+    ),
 }
 
-# ----------------------------
-# User Model
-# ----------------------------
+# ==========================
+# USER MODEL
+# ==========================
 AUTH_USER_MODEL = "main.CustomUser"
 
-# ----------------------------
-# Password Validators
-# ----------------------------
+# ==========================
+# PASSWORD VALIDATION
+# ==========================
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -150,43 +177,36 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-# ----------------------------
+# ==========================
 # CORS
-# ----------------------------
+# ==========================
 CORS_ALLOW_CREDENTIALS = True
+
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://mvp-daroui.onrender.com", 
+    "https://mvp-daroui.onrender.com",
 ]
+
 CSRF_TRUSTED_ORIGINS = [
     "https://backend-django-5ssb.onrender.com",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
 
-# ----------------------------
-# Internationalization
-# ----------------------------
-LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"
-USE_I18N = True
-USE_TZ = True
-
-# ----------------------------
-# Static & Media
-# ----------------------------
+# ==========================
+# STATIC FILES
+# ==========================
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-# WhiteNoise settings
 WHITENOISE_AUTOREFRESH = DEBUG
-WHITENOISE_MAX_AGE = 31536000  # 1 year
+WHITENOISE_MAX_AGE = 31536000
 
-# ----------------------------
-# Default Auto Field
-# ----------------------------
+# ==========================
+# DEFAULT AUTO FIELD
+# ==========================
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

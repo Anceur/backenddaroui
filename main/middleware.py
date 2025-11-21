@@ -1,48 +1,32 @@
-"""
-Middleware to automatically update access token cookie when it's refreshed
-"""
-from django.utils.deprecation import MiddlewareMixin
-from django.conf import settings
-import logging
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.exceptions import TokenError
 
-logger = logging.getLogger(__name__)
+class RefreshTokenMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
 
+    def __call__(self, request):
 
-class RefreshTokenMiddleware(MiddlewareMixin):
-    """
-    Middleware that updates the access_token cookie when a new token is generated
-    during authentication.
-    """
-    
-    def process_response(self, request, response):
-        # Check if a new access token was generated during authentication
-        if hasattr(request, '_new_access_token'):
-            new_token = request._new_access_token
-            refresh_token = getattr(request, '_refresh_token', None)
-            
-            # Determine secure settings
-            is_secure = not settings.DEBUG  # Only secure in production
-            
-            # Update access token cookie
-            response.set_cookie(
-                "access_token",
-                new_token,
-                httponly=True,
-                samesite="Lax" if settings.DEBUG else "None",
-                secure=is_secure,
-            )
-            
-            # Also update refresh token if it was rotated (optional - simplejwt doesn't rotate by default)
-            if refresh_token:
-                response.set_cookie(
-                    "refresh_token",
-                    refresh_token,
-                    httponly=True,
-                    samesite="Lax" if settings.DEBUG else "None",
-                    secure=is_secure,
-                )
-            
-            logger.debug("Updated access_token cookie with refreshed token")
-        
-        return response
+        # إذا كان المستخدم يعمل logout → لا نجدد access
+        if request.path in ["/api/logout/", "/api/admin/logout/"]:
+            return self.get_response(request)
 
+        # نأخذ refresh token من الكوكيز
+        refresh = request.COOKIES.get("refresh_token")
+
+        if not refresh:
+            return self.get_response(request)
+
+        try:
+            # نعمل Refresh
+            refresh_obj = RefreshToken(refresh)
+            access = str(refresh_obj.access_token)
+
+            # نضعه في Authorization لكي Django يقرأ المستخدم
+            request.META["HTTP_AUTHORIZATION"] = f"Bearer {access}"
+
+        except TokenError:
+            # إذا هذا refresh منتهي أو محذوف → لا Auto login
+            pass
+
+        return self.get_response(request)
