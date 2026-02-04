@@ -1,10 +1,66 @@
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from decimal import Decimal
 from .models import (
     CustomUser, Profile, Order, MenuItem, MenuItemSize, OrderItem, 
     Ingredient, MenuItemIngredient, MenuItemSizeIngredient, IngredientStock, IngredientTrace,
-    Table, OfflineOrder, OfflineOrderItem, TableSession, Notification
+    Table, OfflineOrder, OfflineOrderItem, TableSession, Notification,
+    Supplier, SupplierHistory, SupplierTransactionItem, ClientFidele, Expense, StaffMember, Promotion, PromotionItem,
+    RestaurantInfo
 )
 from rest_framework import serializers
+
+class StaffMemberSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(required=False, allow_null=True, write_only=True)
+    password = serializers.CharField(required=False, allow_null=True, write_only=True)
+    has_account = serializers.BooleanField(required=False, default=False, write_only=True)
+
+    class Meta:
+        model = StaffMember
+        fields = ["id", "user", "name", "role", "phone", "address", "image", "username", "password", "has_account", "is_active"]
+        read_only_fields = ["user"]
+
+    def create(self, validated_data):
+        has_account = validated_data.pop('has_account', False)
+        username = validated_data.pop('username', None)
+        password = validated_data.pop('password', None)
+        
+        user = None
+        if has_account and username and password:
+            if CustomUser.objects.filter(username=username).exists():
+                raise serializers.ValidationError({"username": "Username already exists"})
+            
+            # Roles for users are restricted in frontend, but here we just take the role
+            user = CustomUser.objects.create(
+                username=username,
+                roles=validated_data.get('role', 'cashier')
+            )
+            user.set_password(password)
+            user.save()
+            
+        staff = StaffMember.objects.create(user=user, **validated_data)
+        return staff
+
+    def update(self, instance, validated_data):
+        has_account = validated_data.pop('has_account', None)
+        username = validated_data.pop('username', None)
+        password = validated_data.pop('password', None)
+
+        # If password is provided, update user password
+        if instance.user and password:
+            instance.user.set_password(password)
+            instance.user.save()
+
+        # If user roles changed, sync it
+        if 'role' in validated_data and instance.user:
+            instance.user.roles = validated_data['role']
+            instance.user.save()
+
+        return super().update(instance, validated_data)
+
+class ExpenseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Expense
+        fields = '__all__'
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
@@ -170,9 +226,10 @@ class OrderSerializer(serializers.ModelSerializer):
         model = Order
         fields = [
             'id', 'formatted_id', 'customer', 'phone', 'address', 'items', 
-            'total', 'status', 'orderType', 'order_type',
+            'subtotal', 'tax_amount', 'total', 'revenue', 'status', 'orderType', 'order_type',
             'tableNumber', 'table_number', 'date', 'time',
-            'is_confirmed_cashier', 'created_at', 'updated_at'
+            'is_confirmed_cashier', 'loyalty_number', 'loyal_customer', 'notes',
+            'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'formatted_id', 'created_at', 'updated_at']
         extra_kwargs = {
@@ -222,17 +279,26 @@ class OrderSerializer(serializers.ModelSerializer):
         """Custom representation to format fields"""
         representation = super().to_representation(instance)
         
-        # Replace numeric ID with formatted ID for backward compatibility
-        if 'formatted_id' in representation:
-            representation['id'] = representation.pop('formatted_id')
-        
         # Add formatted fields
         representation['orderType'] = instance.order_type
         representation['tableNumber'] = instance.table_number or ''
         
+        # Add loyal_customer as nested object if it exists
+        if instance.loyal_customer:
+            representation['loyalCustomer'] = {
+                'id': instance.loyal_customer.id,
+                'name': instance.loyal_customer.name,
+                'phone': instance.loyal_customer.phone,
+                'loyaltyCardNumber': instance.loyal_customer.loyalty_card_number,
+                'totalSpent': str(instance.loyal_customer.total_spent),
+            }
+        else:
+            representation['loyalCustomer'] = None
+        
         # Remove snake_case versions
         representation.pop('order_type', None)
         representation.pop('table_number', None)
+        representation.pop('loyal_customer', None)  # Remove the ID, we have the nested object
         
         return representation
     
@@ -243,22 +309,85 @@ class OrderSerializer(serializers.ModelSerializer):
         if 'tableNumber' in data:
             data['table_number'] = data.pop('tableNumber')
         return super().to_internal_value(data)
+    
+    def create(self, validated_data):
+        """Create order and link to ClientFidele if loyalty_number matches"""
+        loyalty_number = validated_data.get('loyalty_number')
+        
+        # If loyalty_number is provided and not empty, try to find matching ClientFidele
+        if loyalty_number and str(loyalty_number).strip():
+            from .models import ClientFidele
+            try:
+                # Try to find ClientFidele by loyalty_card_number
+                loyal_customer = ClientFidele.objects.filter(
+                    loyalty_card_number=loyalty_number.strip()
+                ).first()
+                
+                if loyal_customer:
+                    validated_data['loyal_customer'] = loyal_customer
+            except Exception:
+                # If lookup fails, continue without linking
+                pass
+        
+        return super().create(validated_data)
 class MenuItemSizeSerializer(serializers.ModelSerializer):
     menu_item_name = serializers.CharField(source='menu_item.name', read_only=True)
     menu_item_id = serializers.PrimaryKeyRelatedField(
         queryset=MenuItem.objects.all(), source='menu_item', write_only=True
     )
+    cost_price = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, allow_null=True)
     
     class Meta:
         model = MenuItemSize
-        fields = ['id', 'menu_item', 'menu_item_id', 'menu_item_name', 'size', 'price']
+        fields = ['id', 'menu_item', 'menu_item_id', 'menu_item_name', 'size', 'price', 'cost_price']
         read_only_fields = ['menu_item']
+    
+    def validate_cost_price(self, value):
+        """Ensure cost_price is not negative and defaults to 0.00"""
+        if value is None:
+            return 0.00
+        if value < 0:
+            raise serializers.ValidationError("Cost price cannot be negative.")
+        return value
+    
+    def create(self, validated_data):
+        """Create menu item size ensuring cost_price has a value"""
+        if 'cost_price' not in validated_data or validated_data.get('cost_price') is None:
+            validated_data['cost_price'] = 0.00
+        return super().create(validated_data)
+    
+    def update(self, instance, validated_data):
+        """Update menu item size ensuring cost_price has a value"""
+        if 'cost_price' in validated_data and validated_data.get('cost_price') is None:
+            validated_data['cost_price'] = 0.00
+        return super().update(instance, validated_data)
 class MenuItemSerializer(serializers.ModelSerializer):
     sizes = MenuItemSizeSerializer(many=True, read_only=True)
+    cost_price = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, allow_null=True)
     
     class Meta:
         model = MenuItem
-        fields = ['id', 'name', 'description', 'price', 'category', 'image', 'featured', 'sizes']
+        fields = ['id', 'name', 'description', 'price', 'cost_price', 'category', 'image', 'featured', 'sizes']
+    
+    def validate_cost_price(self, value):
+        """Ensure cost_price is not negative and defaults to 0.00"""
+        if value is None:
+            return 0.00
+        if value < 0:
+            raise serializers.ValidationError("Cost price cannot be negative.")
+        return value
+    
+    def create(self, validated_data):
+        """Create menu item ensuring cost_price has a value"""
+        if 'cost_price' not in validated_data or validated_data.get('cost_price') is None:
+            validated_data['cost_price'] = 0.00
+        return super().create(validated_data)
+    
+    def update(self, instance, validated_data):
+        """Update menu item ensuring cost_price has a value"""
+        if 'cost_price' in validated_data and validated_data.get('cost_price') is None:
+            validated_data['cost_price'] = 0.00
+        return super().update(instance, validated_data)
     
     def to_representation(self, instance):
         """Convert image to absolute URL"""
@@ -267,11 +396,24 @@ class MenuItemSerializer(serializers.ModelSerializer):
         # Convert image field to absolute URL if it exists
         if instance.image:
             request = self.context.get('request')
+            image_url = instance.image.url
+            
+            # Build absolute URL
             if request:
-                representation['image'] = request.build_absolute_uri(instance.image.url)
+                # Use request to build absolute URL
+                if image_url.startswith('http://') or image_url.startswith('https://'):
+                    representation['image'] = image_url
+                else:
+                    # Get the scheme and host from request
+                    scheme = request.scheme  # http or https
+                    host = request.get_host()  # localhost:8000 or domain.com
+                    representation['image'] = f"{scheme}://{host}{image_url}"
             else:
-                # Fallback if no request context (shouldn't happen in API views)
-                representation['image'] = instance.image.url
+                # Fallback: use localhost:8000 for development
+                if not image_url.startswith('http'):
+                    representation['image'] = f"http://localhost:8000{image_url}"
+                else:
+                    representation['image'] = image_url
         else:
             representation['image'] = None
         
@@ -305,12 +447,173 @@ class OrderItemSerializer(serializers.ModelSerializer):
             representation['order'] = f"#{instance.order.id}"
         return representation
 
+class SupplierSerializer(serializers.ModelSerializer):
+    """Serializer for Supplier model"""
+    
+    class Meta:
+        model = Supplier
+        fields = ['id', 'name', 'phone', 'supplier_type', 'debt', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+
+class SupplierTransactionItemSerializer(serializers.ModelSerializer):
+    ingredient_name = serializers.CharField(source='ingredient.name', read_only=True)
+    ingredient_unit = serializers.CharField(source='ingredient.unit', read_only=True)
+    
+    class Meta:
+        model = SupplierTransactionItem
+        fields = ['id', 'ingredient', 'ingredient_name', 'ingredient_unit', 'quantity', 'price_per_unit', 'total_price']
+
+class SupplierHistorySerializer(serializers.ModelSerializer):
+    """Serializer for SupplierHistory model"""
+    supplier_name = serializers.CharField(source='supplier.name', read_only=True)
+    transaction_type_display = serializers.CharField(source='get_transaction_type_display', read_only=True)
+    created_by_username = serializers.CharField(source='created_by.username', read_only=True)
+    items = SupplierTransactionItemSerializer(many=True, read_only=True)
+    items_data = serializers.ListField(
+        child=serializers.DictField(),
+        write_only=True,
+        required=False
+    )
+    
+    class Meta:
+        model = SupplierHistory
+        fields = [
+            'id', 'supplier', 'supplier_name', 'transaction_type', 'transaction_type_display',
+            'amount', 'description', 'created_by', 'created_by_username', 'created_at', 'items', 'items_data'
+        ]
+        read_only_fields = ['created_at']
+
+    def create(self, validated_data):
+        items_data = validated_data.pop('items_data', None)
+        history = super().create(validated_data)
+        
+        if items_data and history.transaction_type == 'purchase':
+            total_amount = Decimal('0')
+            for item_data in items_data:
+                ingredient_id = item_data.get('ingredient_id')
+                name = item_data.get('name')
+                quantity = item_data.get('quantity')
+                price_per_unit = item_data.get('price_per_unit')
+                
+                if quantity is None or price_per_unit is None:
+                    continue
+                    
+                # Convert to Decimal for proper calculation
+                quantity_decimal = Decimal(str(quantity))
+                price_per_unit_decimal = Decimal(str(price_per_unit))
+                
+                # Fetch or Create Ingredient
+                ingredient = None
+                if ingredient_id:
+                    try:
+                        ingredient = Ingredient.objects.get(id=ingredient_id)
+                    except Ingredient.DoesNotExist:
+                        pass
+                
+                if not ingredient and name:
+                    # Create new ingredient
+                    # Use unit from data or default? Assuming 'kg' or passed in data
+                    unit = item_data.get('unit', 'kg')
+                    ingredient = Ingredient.objects.create(
+                        name=name,
+                        unit=unit,
+                        price=price_per_unit_decimal,
+                        stock=Decimal('0'), # Will add quantity
+                    )
+                
+                if ingredient:
+                    # Add supplier to ingredient's suppliers (many-to-many) if not already added
+                    if history.supplier and history.supplier not in ingredient.suppliers.all():
+                        ingredient.suppliers.add(history.supplier)
+                    # Create Item
+                    SupplierTransactionItem.objects.create(
+                        supplier_history=history,
+                        ingredient=ingredient,
+                        quantity=quantity_decimal,
+                        price_per_unit=price_per_unit_decimal,
+                        total_price=quantity_decimal * price_per_unit_decimal
+                    )
+                    
+                    # Update Ingredient Stock and Price
+                    # Assuming purchase adds to stock
+                    ingredient.stock = ingredient.stock + quantity_decimal
+                    ingredient.price = price_per_unit_decimal # Update latest price
+                    ingredient.save()
+                    
+                    # Sync IngredientStock record
+                    IngredientStock.objects.update_or_create(
+                        ingredient=ingredient,
+                        defaults={'quantity': ingredient.stock}
+                    )
+                    
+                    total_amount += (quantity_decimal * price_per_unit_decimal)
+            
+            # Update history amount if items were processed (optional, depends on requirement)
+            # Validating that calculated total roughly matches input or overriding it?
+            # User requirement: "amount price will be calulated automaticlly"
+            # It's safer to trust the items calculation
+            history.amount = total_amount
+            history.save()
+        
+        return history
+
+
 class IngredientSerializer(serializers.ModelSerializer):
-    is_low_stock = serializers.BooleanField(read_only=True)
+    is_low_stock = serializers.SerializerMethodField()
+    suppliers = serializers.SerializerMethodField()
+    supplier_names = serializers.SerializerMethodField()
+    suppliers_list = serializers.SerializerMethodField()  # Alias for frontend compatibility
+    supplier_ids = serializers.SerializerMethodField()  # Alias for frontend compatibility
     
     class Meta:
         model = Ingredient
-        fields = ['id', 'name', 'unit', 'stock', 'reorder_level', 'is_low_stock']
+        fields = ['id', 'name', 'unit', 'stock', 'price', 'reorder_level', 'is_low_stock', 'suppliers', 'supplier_names', 'suppliers_list', 'supplier_ids']
+    
+    def get_is_low_stock(self, obj):
+        """Check if stock is below reorder level"""
+        return obj.is_low_stock
+    
+    def get_suppliers(self, obj):
+        """Return list of supplier IDs"""
+        return [supplier.id for supplier in obj.suppliers.all()]
+    
+    def get_supplier_ids(self, obj):
+        """Return list of supplier IDs (alias for frontend)"""
+        return [supplier.id for supplier in obj.suppliers.all()]
+    
+    def get_supplier_names(self, obj):
+        """Return list of supplier names"""
+        return [supplier.name for supplier in obj.suppliers.all()]
+    
+    def get_suppliers_list(self, obj):
+        """Return list of supplier names (alias for frontend compatibility)"""
+        return [supplier.name for supplier in obj.suppliers.all()]
+    
+    def create(self, validated_data):
+        """Create ingredient and handle suppliers"""
+        suppliers_data = self.initial_data.get('suppliers', [])
+        ingredient = Ingredient.objects.create(**validated_data)
+        
+        if suppliers_data:
+            supplier_ids = [s for s in suppliers_data if isinstance(s, int)]
+            ingredient.suppliers.set(supplier_ids)
+        
+        return ingredient
+    
+    def update(self, instance, validated_data):
+        """Update ingredient and handle suppliers"""
+        suppliers_data = self.initial_data.get('suppliers', None)
+        
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        if suppliers_data is not None:
+            supplier_ids = [s for s in suppliers_data if isinstance(s, int)]
+            instance.suppliers.set(supplier_ids)
+        
+        return instance
 
 class MenuItemIngredientSerializer(serializers.ModelSerializer):
     """Serializer for ingredients linked directly to menu items (no sizes)"""
@@ -348,18 +651,19 @@ class MenuItemSizeIngredientSerializer(serializers.ModelSerializer):
 class IngredientStockSerializer(serializers.ModelSerializer):
     ingredient = IngredientSerializer(read_only=True)
     ingredient_id = serializers.PrimaryKeyRelatedField(
-        queryset=Ingredient.objects.all(), source='ingredient', write_only=True
+        queryset=Ingredient.objects.all(), source='ingredient', write_only=True, required=False
     )
     ingredient_name = serializers.CharField(source='ingredient.name', read_only=True)
     ingredient_unit = serializers.CharField(source='ingredient.unit', read_only=True)
+    reorder_level = serializers.DecimalField(source='ingredient.reorder_level', max_digits=10, decimal_places=2, read_only=True)
     
     class Meta:
         model = IngredientStock
         fields = [
             'id', 'ingredient', 'ingredient_id', 'ingredient_name', 'ingredient_unit',
-            'quantity', 'last_updated'
+            'quantity', 'last_updated', 'reorder_level'
         ]
-        read_only_fields = ['last_updated']
+        read_only_fields = ['last_updated', 'quantity']
 
 
 class IngredientTraceSerializer(serializers.ModelSerializer):
@@ -388,7 +692,8 @@ class IngredientTraceSerializer(serializers.ModelSerializer):
         if obj.order:
             return f"Order #{obj.order.id}"
         elif obj.offline_order:
-            return f"Offline Order #{obj.offline_order.id} (Table {obj.offline_order.table.number})"
+            table_info = f" (Table {obj.offline_order.table.number})" if obj.offline_order.table else ""
+            return f"Offline Order #{obj.offline_order.id}{table_info}"
         return None
 
 
@@ -419,13 +724,13 @@ class OfflineOrderItemSerializer(serializers.ModelSerializer):
 class OfflineOrderSerializer(serializers.ModelSerializer):
     table = TableSerializer(read_only=True)
     table_id = serializers.PrimaryKeyRelatedField(
-        queryset=Table.objects.all(), source='table', write_only=True
+        queryset=Table.objects.all(), source='table', write_only=True, required=False, allow_null=True
     )
     items = OfflineOrderItemSerializer(many=True, read_only=True)
     
     class Meta:
         model = OfflineOrder
-        fields = ['id', 'table', 'table_id', 'total', 'status', 'is_confirmed_cashier', 'notes', 'items', 'created_at', 'updated_at']
+        fields = ['id', 'table', 'table_id', 'total', 'revenue', 'status', 'is_confirmed_cashier', 'notes', 'items', 'is_imported', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
@@ -451,6 +756,17 @@ class TableSessionSerializer(serializers.ModelSerializer):
     
     def get_is_expired(self, obj):
         return obj.is_expired()
+
+
+class ClientFideleSerializer(serializers.ModelSerializer):
+    """Serializer for loyal customers"""
+    class Meta:
+        model = ClientFidele
+        fields = [
+            'id', 'name', 'phone', 'loyalty_card_number', 
+            'total_spent', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['loyalty_card_number', 'total_spent', 'created_at', 'updated_at']
 
 
 class NotificationSerializer(serializers.ModelSerializer):
@@ -480,3 +796,65 @@ class NotificationSerializer(serializers.ModelSerializer):
             return f"{minutes} min ago"
         else:
             return "Just now"
+
+class PromotionItemSerializer(serializers.ModelSerializer):
+    menu_item_name = serializers.CharField(source='menu_item.name', read_only=True)
+    size_label = serializers.CharField(source='menu_item_size.size', read_only=True)
+    
+    class Meta:
+        model = PromotionItem
+        fields = ['id', 'promotion', 'menu_item', 'menu_item_name', 'menu_item_size', 'size_label', 'quantity']
+
+class RestaurantInfoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RestaurantInfo
+        fields = ['id', 'opening_time', 'closing_time']
+    
+
+
+class PromotionSerializer(serializers.ModelSerializer):
+    combo_items = PromotionItemSerializer(many=True, required=False)
+    display_status = serializers.CharField(read_only=True)
+    
+    class Meta:
+        model = Promotion
+        fields = ['id', 'name', 'description', 'promotion_type', 'value', 'start_date', 'end_date', 'is_active', 'status', 'display_status', 'applicable_items', 'applicable_sizes', 'combo_items', 'created_at']
+
+    def create(self, validated_data):
+        combo_items_data = validated_data.pop('combo_items', [])
+        applicable_items = validated_data.pop('applicable_items', [])
+        applicable_sizes = validated_data.pop('applicable_sizes', [])
+        
+        promotion = Promotion.objects.create(**validated_data)
+        promotion.applicable_items.set(applicable_items)
+        promotion.applicable_sizes.set(applicable_sizes)
+        
+        for item_data in combo_items_data:
+            PromotionItem.objects.create(promotion=promotion, **item_data)
+            
+        return promotion
+
+    def update(self, instance, validated_data):
+        combo_items_data = validated_data.pop('combo_items', None)
+        applicable_items = validated_data.pop('applicable_items', None)
+        applicable_sizes = validated_data.pop('applicable_sizes', None)
+        
+        # Update basics
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        # Update ManyToMany
+        if applicable_items is not None:
+            instance.applicable_items.set(applicable_items)
+        if applicable_sizes is not None:
+            instance.applicable_sizes.set(applicable_sizes)
+            
+        # Update Nested Combo Items
+        if combo_items_data is not None:
+            instance.combo_items.all().delete()
+            for item_data in combo_items_data:
+                PromotionItem.objects.create(promotion=instance, **item_data)
+                
+        return instance
+

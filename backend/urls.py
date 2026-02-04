@@ -20,12 +20,19 @@ import main.urls
 from django.urls import include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.views.static import serve
+from django.urls import re_path
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include(main.urls)),
 ]
 
-# Serve media files in development
+# Serve media files in development (works with both runserver and Daphne/ASGI)
 if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    # Use serve view directly for ASGI compatibility
+    urlpatterns += [
+        re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
+    ]
+    # Also add static() helper for static files
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

@@ -84,6 +84,7 @@ def send_notification_to_role(role, notification_type, title, message,
         # that can be retrieved later when users with that role log in
         if not users.exists():
             logger.info(f"No users found with role '{role}', creating role-based notification")
+            logger.info(f"Notification message being saved: {message}")
             # Create a notification without a specific user (role-based only)
             notification = Notification.objects.create(
                 user=None,
@@ -99,6 +100,7 @@ def send_notification_to_role(role, notification_type, title, message,
             # Refresh from database to ensure priority was saved correctly
             notification.refresh_from_db()
             logger.info(f"Created role-based notification {notification.id} for role '{role}' with priority={notification.priority} (expected: {priority})")
+            logger.info(f"Notification {notification.id} message saved as: {notification.message}")
             if notification.priority != priority:
                 logger.error(f"PRIORITY MISMATCH! Notification {notification.id} has priority '{notification.priority}' but expected '{priority}'")
             # Only send via WebSocket if not low priority
@@ -109,6 +111,7 @@ def send_notification_to_role(role, notification_type, title, message,
         for user in users:
             try:
                 logger.info(f"Creating notification for user {user.id} ({user.username}) with role '{role}'")
+                logger.info(f"Notification message being saved: {message}")
                 notification = Notification.objects.create(
                     user=user,
                     role=role,
@@ -123,6 +126,7 @@ def send_notification_to_role(role, notification_type, title, message,
                 # Refresh from database to ensure priority was saved correctly
                 notification.refresh_from_db()
                 logger.info(f"Successfully created notification {notification.id} for user {user.id} with priority={notification.priority} (expected: {priority})")
+                logger.info(f"Notification {notification.id} message saved as: {notification.message}")
                 if notification.priority != priority:
                     logger.error(f"PRIORITY MISMATCH! Notification {notification.id} has priority '{notification.priority}' but expected '{priority}'")
                 notifications.append(notification)
@@ -244,14 +248,38 @@ def notify_new_order(order):
     try:
         # NOTE: Chefs do NOT get new order notifications - they only get confirmed order notifications
         
+        # Reload order with loyal_customer relationship to ensure it's loaded
+        loyal_customer_obj = None
+        try:
+            from .models import Order
+            order = Order.objects.select_related('loyal_customer').get(id=order.id)
+            loyal_customer_obj = order.loyal_customer
+        except Exception:
+            # If reload fails, try to get loyal_customer_id and load it separately
+            try:
+                loyal_customer_id = getattr(order, 'loyal_customer_id', None)
+                if loyal_customer_id:
+                    from .models import ClientFidele
+                    loyal_customer_obj = ClientFidele.objects.get(id=loyal_customer_id)
+            except Exception:
+                pass
+        
+        # Build customer info with loyalty number if available
+        if loyal_customer_obj:
+            customer_info = f'{loyal_customer_obj.name} (Loyalty: {loyal_customer_obj.loyalty_card_number})'
+        elif hasattr(order, 'loyalty_number') and order.loyalty_number:
+            customer_info = f'{order.customer} (Loyalty: {order.loyalty_number})'
+        else:
+            customer_info = order.customer
+        
         # Notify cashiers about ALL new orders (CRITICAL - with sound)
         cashier_title = f'New Order #{order.id}'
-        cashier_message = f'New {order.order_type} order from {order.customer}'
+        cashier_message = f'New {order.order_type} order from {customer_info}'
         
         # Add confirmation note if order needs confirmation
         if not order.is_confirmed_cashier:
             cashier_title = f'Order #{order.id} - Needs Confirmation'
-            cashier_message = f'Order #{order.id} from {order.customer} needs cashier confirmation'
+            cashier_message = f'Order #{order.id} from {customer_info} needs cashier confirmation'
         
         send_notification_to_role(
             role='cashier',
@@ -269,7 +297,7 @@ def notify_new_order(order):
                 role='admin',
                 notification_type='order',
                 title=f'New Online Order #{order.id}',
-                message=f'New {order.order_type} order from {order.customer}',
+                message=f'New {order.order_type} order from {customer_info}',
                 related_order=order,
                 priority='critical'  # Critical: real-time + sound
             )
@@ -384,13 +412,16 @@ def notify_offline_order(offline_order):
     try:
         # NOTE: Chefs do NOT get new offline order notifications - they only get confirmed order notifications
         
+        # Determine Source Info
+        table_info = f'Table {offline_order.table.number}' if offline_order.table else 'Imported Order'
+
         # Notify cashiers about new offline orders (CRITICAL - with sound)
         if not offline_order.is_confirmed_cashier:
             send_notification_to_role(
                 role='cashier',
                 notification_type='order',
-                title=f'Table Order #{offline_order.id} - Needs Confirmation',
-                message=f'Order from Table {offline_order.table.number} needs confirmation',
+                title=f'{table_info} #{offline_order.id} - Needs Confirmation',
+                message=f'Order from {table_info} needs confirmation',
                 related_offline_order=offline_order,
                 priority='critical'  # Critical: real-time + sound for cashiers
             )
@@ -420,13 +451,50 @@ def notify_order_confirmed_by_cashier(order, order_type='online'):
         if order_type == 'online':
             # NOTE: Cashiers do NOT get confirmed order notifications - they only get new order notifications
             
+            # Reload order from database with loyal_customer relationship to ensure it's loaded
+            loyal_customer_obj = None
+            try:
+                from .models import Order
+                order = Order.objects.select_related('loyal_customer').get(id=order.id)
+                loyal_customer_obj = order.loyal_customer
+                logger.info(f"Reloaded order {order.id}, loyal_customer: {loyal_customer_obj}")
+                if loyal_customer_obj:
+                    logger.info(f"Loyal customer details: id={loyal_customer_obj.id}, name={loyal_customer_obj.name}, card={loyal_customer_obj.loyalty_card_number}")
+            except Exception as e:
+                logger.warning(f"Failed to reload order {order.id}: {e}")
+                # If reload fails, try to get loyal_customer_id and load it separately
+                try:
+                    loyal_customer_id = getattr(order, 'loyal_customer_id', None)
+                    if loyal_customer_id:
+                        from .models import ClientFidele
+                        loyal_customer_obj = ClientFidele.objects.get(id=loyal_customer_id)
+                        logger.info(f"Loaded loyal_customer separately: {loyal_customer_obj.id}: {loyal_customer_obj.name}")
+                except Exception as e2:
+                    logger.warning(f"Failed to load loyal_customer separately: {e2}")
+            
+            # Build customer info with loyalty number if available
+            # If loyal_customer is linked, use that name; otherwise use order.customer
+            if loyal_customer_obj:
+                customer_name = loyal_customer_obj.name
+                loyalty_info = loyal_customer_obj.loyalty_card_number
+                customer_info = f'{customer_name} (Loyalty: {loyalty_info})'
+                logger.info(f"Using loyal customer name: {customer_name} with loyalty: {loyalty_info}")
+            elif hasattr(order, 'loyalty_number') and order.loyalty_number:
+                customer_info = f'{order.customer} (Loyalty: {order.loyalty_number})'
+                logger.info(f"Using order customer with loyalty number: {order.customer} (Loyalty: {order.loyalty_number})")
+            else:
+                customer_info = order.customer
+                logger.info(f"Using regular order customer: {order.customer}")
+            
             # Notify chefs about confirmed online order (CRITICAL - with sound)
+            notification_message = f'Order #{order.id} from {customer_info} has been confirmed by cashier. Ready to start preparing.'
             logger.info(f"Sending notification to chefs for confirmed online order {order.id} with priority='critical'")
+            logger.info(f"Notification message will be: {notification_message}")
             chef_notifications = send_notification_to_role(
                 role='chef',
                 notification_type='order',
                 title=f'Order #{order.id} Confirmed - Ready to Prepare',
-                message=f'Order #{order.id} from {order.customer} has been confirmed by cashier. Ready to start preparing.',
+                message=notification_message,
                 related_order=order,
                 priority='critical'  # Critical: real-time + sound for chefs
             )
@@ -454,13 +522,20 @@ def notify_order_confirmed_by_cashier(order, order_type='online'):
             
             # NOTE: Cashiers do NOT get confirmed order notifications - they only get new order notifications
             
+            # Note: OfflineOrder doesn't have loyal_customer field, only loyalty_number if added
+            # Build customer info with loyalty number if available (for offline orders)
+            if hasattr(order, 'loyalty_number') and order.loyalty_number:
+                customer_info = f'{table_info} (Loyalty: {order.loyalty_number})'
+            else:
+                customer_info = table_info
+            
             # Notify chefs about confirmed offline order (CRITICAL - with sound)
             logger.info(f"Sending notification to chefs for confirmed offline order {order.id} with priority='critical'")
             chef_notifications = send_notification_to_role(
                 role='chef',
                 notification_type='order',
                 title=f'Table Order #{order.id} Confirmed - Ready to Prepare',
-                message=f'Order #{order.id} from {table_info} has been confirmed by cashier. Ready to start preparing.',
+                message=f'Order #{order.id} from {customer_info} has been confirmed by cashier. Ready to start preparing.',
                 related_offline_order=order,
                 priority='critical'  # Critical: real-time + sound for chefs
             )

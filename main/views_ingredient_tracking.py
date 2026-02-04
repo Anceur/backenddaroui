@@ -33,7 +33,13 @@ class IngredientStockListCreateView(APIView):
             serializer = IngredientStockSerializer(data=request.data)
             if serializer.is_valid():
                 stock = serializer.save()
-                # Also update the Ingredient model's stock field
+                # Update reorder_level if provided
+                reorder_level = request.data.get('reorder_level')
+                if reorder_level is not None:
+                    stock.ingredient.reorder_level = reorder_level
+                    stock.ingredient.save(update_fields=['reorder_level'])
+                
+                # Update the Ingredient model's stock field to sync
                 stock.ingredient.stock = stock.quantity
                 stock.ingredient.save(update_fields=['stock'])
                 return Response(
@@ -78,7 +84,13 @@ class IngredientStockDetailView(APIView):
             serializer = IngredientStockSerializer(stock, data=request.data)
             if serializer.is_valid():
                 stock = serializer.save()
-                # Also update the Ingredient model's stock field
+                # Update reorder_level if provided
+                reorder_level = request.data.get('reorder_level')
+                if reorder_level is not None:
+                    stock.ingredient.reorder_level = reorder_level
+                    stock.ingredient.save(update_fields=['reorder_level'])
+                
+                # Sync stock for consistency
                 stock.ingredient.stock = stock.quantity
                 stock.ingredient.save(update_fields=['stock'])
                 return Response(serializer.data, status=status.HTTP_200_OK)
@@ -103,7 +115,13 @@ class IngredientStockDetailView(APIView):
             serializer = IngredientStockSerializer(stock, data=request.data, partial=True)
             if serializer.is_valid():
                 stock = serializer.save()
-                # Also update the Ingredient model's stock field
+                # Update reorder_level if provided
+                reorder_level = request.data.get('reorder_level')
+                if reorder_level is not None:
+                    stock.ingredient.reorder_level = reorder_level
+                    stock.ingredient.save(update_fields=['reorder_level'])
+                
+                # Sync stock for consistency
                 stock.ingredient.stock = stock.quantity
                 stock.ingredient.save(update_fields=['stock'])
                 return Response(serializer.data, status=status.HTTP_200_OK)
@@ -148,7 +166,7 @@ class IngredientTraceListView(APIView):
         """Get all ingredient traces with optional filtering"""
         try:
             traces = IngredientTrace.objects.select_related(
-                'ingredient', 'order', 'used_by'
+                'ingredient', 'order', 'used_by', 'offline_order', 'offline_order__table'
             ).all().order_by('-timestamp')
             
             # Optional filters

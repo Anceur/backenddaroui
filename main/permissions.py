@@ -26,3 +26,13 @@ class IsChefOrAdmin(permissions.BasePermission):
             request.user.is_authenticated and 
             request.user.roles in ['admin', 'chef']
         )
+
+
+class IsCashierOrAdmin(permissions.BasePermission):
+    """Allow access to both admin and cashier users"""
+    def has_permission(self, request, view):
+        return bool(
+            request.user and 
+            request.user.is_authenticated and 
+            request.user.roles in ['admin', 'cashier']
+        )

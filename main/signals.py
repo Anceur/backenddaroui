@@ -36,7 +36,7 @@ def handle_order_status_change(sender, instance, **kwargs):
 @receiver(post_save, sender=Order)
 def handle_order_status_ready(sender, instance, created, **kwargs):
     """
-    Signal handler that processes ingredient usage when an order status changes to 'Ready'.
+    Signal handler that processes ingredient usage when an order status changes to 'Confirmed'.
     
     This signal:
     1. Loops through all OrderItems in the order
@@ -48,8 +48,8 @@ def handle_order_status_ready(sender, instance, created, **kwargs):
     import logging
     logger = logging.getLogger(__name__)
     
-    # Only process when status is 'Ready'
-    if instance.status != 'Ready':
+    # Only process when status is 'Confirmed'
+    if instance.status != 'Confirmed':
         return
     
     logger.info(f"🔔 Signal triggered for Order #{instance.id} with status '{instance.status}' (created={created})")
@@ -129,25 +129,21 @@ def handle_order_status_ready(sender, instance, created, **kwargs):
                 # Calculate quantity used: ingredient quantity per unit * order item quantity
                 quantity_used = Decimal(str(ingredient_link.quantity)) * Decimal(str(order_item.quantity))
                 
-                # Get or create IngredientStock record
-                stock_record, created = IngredientStock.objects.get_or_create(
-                    ingredient=ingredient,
-                    defaults={'quantity': ingredient.stock}
-                )
+                # Get stock before update - prioritize Ingredient.stock
+                stock_before = ingredient.stock
                 
-                # Get stock before update
-                stock_before = stock_record.quantity
+                # Allow negative stock
+                stock_after = stock_before - quantity_used
                 
-                # Ensure we don't go below zero
-                stock_after = max(Decimal('0'), stock_before - quantity_used)
-                
-                # Update stock
-                stock_record.quantity = stock_after
-                stock_record.save()
-                
-                # Also update the Ingredient model's stock field for consistency
+                # Update Ingredient model
                 ingredient.stock = stock_after
                 ingredient.save(update_fields=['stock'])
+                
+                # Sync IngredientStock record
+                IngredientStock.objects.update_or_create(
+                    ingredient=ingredient,
+                    defaults={'quantity': stock_after}
+                )
                 
                 # Create trace record
                 trace = IngredientTrace.objects.create(
@@ -169,12 +165,31 @@ def handle_order_status_ready(sender, instance, created, **kwargs):
             f"{skipped_no_ingredients} items skipped (no ingredients)"
         )
         
-        if processed_count == 0:
-            logger.warning(
-                f"⚠️ Order #{instance.id} processed but NO traces were created! "
-                f"This means no OrderItems had ingredients configured. "
-                f"Check that menu items have ingredients added (either via sizes or directly)."
-            )
+    # Calculate and save revenue if it's not set or needs update
+    try:
+        total_sell = Decimal('0')
+        total_cost = Decimal('0')
+        order_items = OrderItem.objects.filter(order=instance).select_related('item', 'size')
+        
+        for item in order_items:
+            qty = Decimal(str(item.quantity))
+            if item.size:
+                total_sell += item.size.price * qty
+                total_cost += (item.size.cost_price or Decimal('0')) * qty
+            else:
+                total_sell += item.item.price * qty
+                total_cost += (item.item.cost_price or Decimal('0')) * qty
+        
+        calculated_revenue = total_sell - total_cost
+        if instance.revenue != calculated_revenue:
+            instance.revenue = calculated_revenue
+            # Using update_fields to avoid recursion if possible, but status is also needed
+            # We are inside post_save, so we should be careful. 
+            # Better to use a separate update to avoid triggering signals again if not needed
+            Order.objects.filter(pk=instance.pk).update(revenue=calculated_revenue)
+            logger.info(f"Updated revenue for Order #{instance.id}: {calculated_revenue}")
+    except Exception as e:
+        logger.error(f"Error calculating revenue for Order #{instance.id}: {e}")
     
     # Send notification for status changes
     if hasattr(instance, '_status_changed') and instance._status_changed:
@@ -208,7 +223,7 @@ def handle_offline_order_status_change(sender, instance, **kwargs):
 @receiver(post_save, sender=OfflineOrder)
 def handle_offline_order_status_ready(sender, instance, created, **kwargs):
     """
-    Signal handler that processes ingredient usage when an offline order status changes to 'Ready'.
+    Signal handler that processes ingredient usage when an offline order status changes to 'Confirmed'.
     
     This signal:
     1. Loops through all OfflineOrderItems in the order
@@ -221,8 +236,8 @@ def handle_offline_order_status_ready(sender, instance, created, **kwargs):
     import logging
     logger = logging.getLogger(__name__)
     
-    # Only process when status is 'Ready'
-    if instance.status != 'Ready':
+    # Only process when status is 'Confirmed'
+    if instance.status != 'Confirmed':
         return
     
     logger.info(f"🔔 Signal triggered for OfflineOrder #{instance.id} with status '{instance.status}' (created={created})")
@@ -296,25 +311,21 @@ def handle_offline_order_status_ready(sender, instance, created, **kwargs):
                 # Calculate quantity used: ingredient quantity per unit * order item quantity
                 quantity_used = Decimal(str(ingredient_link.quantity)) * Decimal(str(order_item.quantity))
                 
-                # Get or create IngredientStock record
-                stock_record, created = IngredientStock.objects.get_or_create(
-                    ingredient=ingredient,
-                    defaults={'quantity': ingredient.stock}
-                )
+                # Get stock before update - prioritize Ingredient.stock
+                stock_before = ingredient.stock
                 
-                # Get stock before update
-                stock_before = stock_record.quantity
+                # Allow negative stock
+                stock_after = stock_before - quantity_used
                 
-                # Ensure we don't go below zero
-                stock_after = max(Decimal('0'), stock_before - quantity_used)
-                
-                # Update stock
-                stock_record.quantity = stock_after
-                stock_record.save()
-                
-                # Also update the Ingredient model's stock field for consistency
+                # Update Ingredient model
                 ingredient.stock = stock_after
                 ingredient.save(update_fields=['stock'])
+                
+                # Sync IngredientStock record
+                IngredientStock.objects.update_or_create(
+                    ingredient=ingredient,
+                    defaults={'quantity': stock_after}
+                )
                 
                 # Create trace record
                 trace = IngredientTrace.objects.create(
@@ -342,6 +353,29 @@ def handle_offline_order_status_ready(sender, instance, created, **kwargs):
                 f"This means no OfflineOrderItems had ingredients configured. "
                 f"Check that menu items have ingredients added (either via sizes or directly)."
             )
+
+        # Calculate and save revenue if it's not set or needs update
+        try:
+            total_sell = Decimal('0')
+            total_cost = Decimal('0')
+            offline_items = OfflineOrderItem.objects.filter(offline_order=instance).select_related('item', 'size')
+            
+            for item in offline_items:
+                qty = Decimal(str(item.quantity))
+                # For offline orders, we use item.price which reflects the price at order time
+                total_sell += item.price * qty 
+                if item.size:
+                    total_cost += (item.size.cost_price or Decimal('0')) * qty
+                else:
+                    total_cost += (item.item.cost_price or Decimal('0')) * qty
+            
+            calculated_revenue = total_sell - total_cost
+            if instance.revenue != calculated_revenue:
+                instance.revenue = calculated_revenue
+                OfflineOrder.objects.filter(pk=instance.pk).update(revenue=calculated_revenue)
+                logger.info(f"Updated revenue for OfflineOrder #{instance.id}: {calculated_revenue}")
+        except Exception as e:
+            logger.error(f"Error calculating revenue for OfflineOrder #{instance.id}: {e}")
     
     # Send notification for status changes
     if hasattr(instance, '_status_changed') and instance._status_changed:

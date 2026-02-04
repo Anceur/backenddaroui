@@ -1,10 +1,12 @@
 import os
 from pathlib import Path
 from datetime import timedelta
-import dj_database_url
-import cloudinary
-import cloudinary.uploader
-import cloudinary.api
+# Deployment imports
+# import dj_database_url
+# Cloudinary imports (commented out - using local storage)
+# import cloudinary
+# import cloudinary.uploader
+# import cloudinary.api
 
 # ==========================
 # BASE DIR
@@ -15,11 +17,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY
 # ==========================
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "unsafe-secret")
-DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() in ("1", "true", "yes")
+DEBUG = os.environ.get("DJANGO_DEBUG", "True").lower() in ("1", "true", "yes")
 
 ALLOWED_HOSTS = os.environ.get(
     "ALLOWED_HOSTS",
-    "localhost,127.0.0.1,backend-django-5ssb.onrender.com"
+    "*"
 ).split(",")
 
 # ==========================
@@ -42,9 +44,9 @@ INSTALLED_APPS = [
     "corsheaders",
     "channels",
 
-    # Cloudinary Apps
-    "cloudinary",
-    "cloudinary_storage",
+    # Cloudinary apps (commented out - using local storage)
+    # "cloudinary",
+    # "cloudinary_storage",
 ]
 
 # ==========================
@@ -53,7 +55,8 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
-    "whitenoise.middleware.WhiteNoiseMiddleware",
+    # Deployment middleware (commented for local development)
+    # "whitenoise.middleware.WhiteNoiseMiddleware",
 
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -98,22 +101,31 @@ TEMPLATES = [
 SESSION_COOKIE_NAME = "admin_session"
 CSRF_COOKIE_NAME = "admin_csrftoken"
 
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+# Deployment settings (commented for local development - HTTPS only)
+# SESSION_COOKIE_SECURE = True
+# CSRF_COOKIE_SECURE = True
 
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
 
 # ==========================
-# DATABASE (Render PostgreSQL)
+# DATABASE (Local SQLite - Deployment PostgreSQL commented)
 # ==========================
 DATABASES = {
-    "default": dj_database_url.config(
-        default=os.environ.get("DATABASE_URL"),
-        conn_max_age=600,
-        ssl_require=True,
-    )
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "db.sqlite3",
+    }
 }
+
+# Deployment database config (commented for local development)
+# DATABASES = {
+#     "default": dj_database_url.config(
+#         default=os.environ.get("DATABASE_URL"),
+#         conn_max_age=600,
+#         ssl_require=True,
+#     )
+# }
 
 # ==========================
 # CHANNELS + REDIS
@@ -189,11 +201,13 @@ CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://mvp-daroui.onrender.com",
+    # Deployment origin (commented for local development)
+    # "https://mvp-daroui.onrender.com",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://backend-django-5ssb.onrender.com",
+    # Deployment origin (commented for local development)
+    # "https://backend-django-5ssb.onrender.com",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
@@ -204,26 +218,43 @@ CSRF_TRUSTED_ORIGINS = [
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-# LOCAL Media (لن تُستعمل بعد Cloudinary)
+# ==========================
+# LOCAL MEDIA FILES STORAGE
+# ==========================
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-WHITENOISE_AUTOREFRESH = DEBUG
-WHITENOISE_MAX_AGE = 31536000
+# Cloudinary configuration (commented out - using local storage)
+# cloudinary.config(
+#     cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME", "dn8xzjryk"),
+#     api_key=os.environ.get("CLOUDINARY_API_KEY", "911141654755575"),
+#     api_secret=os.environ.get("CLOUDINARY_API_SECRET", "FCdYWgHG-bQS6ISbJ0J2aSSTkJk"),
+#     secure=True  # Use HTTPS
+# )
+
+# CLOUDINARY_STORAGE = {
+#     "CLOUD_NAME": os.environ.get("CLOUDINARY_CLOUD_NAME", "dn8xzjryk"),
+#     "API_KEY": os.environ.get("CLOUDINARY_API_KEY", "911141654755575"),
+#     "API_SECRET": os.environ.get("CLOUDINARY_API_SECRET", "FCdYWgHG-bQS6ISbJ0J2aSSTkJk"),
+# }
+
+# DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 
 # ==========================
-# CLOUDINARY SETTINGS (أضفتها فقط)
+# INTERNATIONALIZATION
 # ==========================
-CLOUDINARY_STORAGE = {
-    "CLOUD_NAME": os.environ.get("CLOUDINARY_CLOUD_NAME"),
-    "API_KEY": os.environ.get("CLOUDINARY_API_KEY"),
-    "API_SECRET": os.environ.get("CLOUDINARY_API_SECRET"),
-}
+LANGUAGE_CODE = "en-us"
 
+# Set timezone to Algeria (UTC+1)
+TIME_ZONE = "Africa/Algiers"
 
-DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
+# Enable timezone support
+USE_I18N = True
+USE_TZ = True
 
 # ==========================
 # DEFAULT AUTO FIELD
 # ==========================
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+print(f'Active Timezone Configured: {TIME_ZONE}')
