@@ -201,10 +201,8 @@ CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    # Deployment origin (commented for local development)
-    # "https://mvp-daroui.onrender.com",
+    "https://frontenddaroui.onrender.com",  # Add your Render frontend URL
 ]
-
 CSRF_TRUSTED_ORIGINS = [
     # Deployment origin (commented for local development)
     # "https://backend-django-5ssb.onrender.com",
