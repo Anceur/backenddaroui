@@ -1,6 +1,10 @@
 import os
 from pathlib import Path
 from datetime import timedelta
+from dotenv import load_dotenv
+import dj_database_url
+load_dotenv()
+
 # Deployment imports
 # import dj_database_url
 # Cloudinary imports (commented out - using local storage)
@@ -111,21 +115,21 @@ CSRF_COOKIE_SAMESITE = "Lax"
 # ==========================
 # DATABASE (Local SQLite - Deployment PostgreSQL commented)
 # ==========================
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
-}
+# DATABASES = {
+#     "default": {
+#         "ENGINE": "django.db.backends.sqlite3",
+#         "NAME": BASE_DIR / "db.sqlite3",
+#     }
+# }
 
 # Deployment database config (commented for local development)
-# DATABASES = {
-#     "default": dj_database_url.config(
-#         default=os.environ.get("DATABASE_URL"),
-#         conn_max_age=600,
-#         ssl_require=True,
-#     )
-# }
+DATABASES = {
+    "default": dj_database_url.config(
+        default=os.environ.get("DATABASE_URL"),
+        conn_max_age=600,
+        ssl_require=True,
+    )
+}
 
 # ==========================
 # CHANNELS + REDIS
@@ -201,7 +205,7 @@ CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://frontenddaroui.onrender.com",  # Add your Render frontend URL
+    "https://frontenddaroui.onrender.com",  
 ]
 CSRF_TRUSTED_ORIGINS = [
     # Deployment origin (commented for local development)
