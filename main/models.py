@@ -21,7 +21,7 @@ class Expense(models.Model):
     notes = models.TextField(blank=True)
     date = models.DateField(default=timezone.now)
     created_at = models.DateTimeField(auto_now_add=True)
-    image = serializers.URLField(required=False, allow_blank=True)
+   image = models.URLField(blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
