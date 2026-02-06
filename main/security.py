@@ -237,7 +237,7 @@ class OrderSecurityValidator:
             return False, "Security validation failed", errors
         
         # 4. Timestamp validation
-        is_valid_time, time_error = cls.validate_timestamp(security_token_data, min_seconds=3, max_seconds=3600)
+        is_valid_time, time_error = cls.validate_timestamp(security_token_data, min_seconds=0.5, max_seconds=3600)
         if not is_valid_time:
             errors.append({
                 'type': 'timestamp',
