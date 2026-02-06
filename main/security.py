@@ -69,7 +69,7 @@ class OrderSecurityValidator:
         return True
     
     @staticmethod
-    def validate_timestamp(token_data, min_seconds=3, max_seconds=3600):
+    def validate_timestamp(token_data, min_seconds=1.0, max_seconds=3600):
         """
         Validate that form was filled in reasonable time
         token_data should contain 'timestamp' field
