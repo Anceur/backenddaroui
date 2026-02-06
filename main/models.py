@@ -21,7 +21,6 @@ class Expense(models.Model):
     notes = models.TextField(blank=True)
     date = models.DateField(default=timezone.now)
     created_at = models.DateTimeField(auto_now_add=True)
-    image = models.URLField(blank=True, null=True)  # ← Fixed: 4 spaces
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
