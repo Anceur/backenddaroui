@@ -57,6 +57,22 @@ class StaffMemberSerializer(serializers.ModelSerializer):
 
         return super().update(instance, validated_data)
 
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        if instance.image:
+            image_url = instance.image
+            if image_url.startswith('http://') or image_url.startswith('https://'):
+                representation['image'] = image_url
+            else:
+                request = self.context.get('request')
+                if request:
+                    representation['image'] = request.build_absolute_uri(image_url)
+                else:
+                    representation['image'] = image_url
+        else:
+            representation['image'] = None
+        return representation
+
 class ExpenseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Expense
@@ -121,6 +137,22 @@ class ProfileSerializer(serializers.ModelSerializer):
             user.save()
         
         return instance
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        if instance.image:
+            image_url = instance.image
+            if image_url.startswith('http://') or image_url.startswith('https://'):
+                representation['image'] = image_url
+            else:
+                request = self.context.get('request')
+                if request:
+                    representation['image'] = request.build_absolute_uri(image_url)
+                else:
+                    representation['image'] = image_url
+        else:
+            representation['image'] = None
+        return representation
 
 class UserWithProfileSerializer(serializers.ModelSerializer):
     """Serializer for creating and updating a user with profile"""
@@ -201,11 +233,15 @@ class UserWithProfileSerializer(serializers.ModelSerializer):
             representation['phone'] = profile.phone
             representation['address'] = profile.address
             if profile.image:
-                request = self.context.get('request')
-                if request:
-                    representation['image'] = request.build_absolute_uri(profile.image.url)
+                image_url = profile.image
+                if image_url.startswith('http://') or image_url.startswith('https://'):
+                    representation['image'] = image_url
                 else:
-                    representation['image'] = profile.image.url
+                    request = self.context.get('request')
+                    if request:
+                        representation['image'] = request.build_absolute_uri(image_url)
+                    else:
+                        representation['image'] = image_url
             else:
                 representation['image'] = None
         except Profile.DoesNotExist:
@@ -395,25 +431,22 @@ class MenuItemSerializer(serializers.ModelSerializer):
         
         # Convert image field to absolute URL if it exists
         if instance.image:
-            request = self.context.get('request')
-            image_url = instance.image.url
+            image_url = instance.image
             
-            # Build absolute URL
-            if request:
-                # Use request to build absolute URL
-                if image_url.startswith('http://') or image_url.startswith('https://'):
-                    representation['image'] = image_url
-                else:
+            # If it's already an absolute URL (like Firebase), just return it
+            if image_url.startswith('http://') or image_url.startswith('https://'):
+                representation['image'] = image_url
+            else:
+                # Handle relative paths (legacy or local development)
+                request = self.context.get('request')
+                if request:
                     # Get the scheme and host from request
                     scheme = request.scheme  # http or https
                     host = request.get_host()  # localhost:8000 or domain.com
                     representation['image'] = f"{scheme}://{host}{image_url}"
-            else:
-                # Fallback: use localhost:8000 for development
-                if not image_url.startswith('http'):
-                    representation['image'] = f"http://localhost:8000{image_url}"
                 else:
-                    representation['image'] = image_url
+                    # Fallback: use localhost:8000 for development
+                    representation['image'] = f"http://localhost:8000{image_url}"
         else:
             representation['image'] = None
         

@@ -48,7 +48,7 @@ class CustomUser(AbstractUser):
         super().save(*args, **kwargs)
 class Profile(models.Model):
     user = models.OneToOneField(CustomUser, on_delete=models.CASCADE)
-    image = models.ImageField(upload_to='profiles/', null=True, blank=True)
+    image = models.TextField(blank=True, null=True)
     phone = models.CharField(max_length=20, blank=True)
     address = models.CharField(max_length=200, blank=True)
 
@@ -58,7 +58,7 @@ class StaffMember(models.Model):
     role = models.CharField(max_length=100)
     phone = models.CharField(max_length=20, blank=True)
     address = models.CharField(max_length=200, blank=True)
-    image = models.ImageField(upload_to='staff/', null=True, blank=True)
+    image = models.TextField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -85,7 +85,7 @@ class MenuItem(models.Model):
     price = models.DecimalField(max_digits=6, decimal_places=2, help_text="Selling price")
     cost_price = models.DecimalField(max_digits=6, decimal_places=2, default=0.00, help_text="Cost price for profit calculation")
     category = models.CharField(max_length=50, choices=CATEGORY_CHOICES)
-    image = models.ImageField(upload_to='menu_items/', blank=True, null=True)
+    image = models.TextField(blank=True, null=True)
     featured = models.BooleanField(default=False)
 
     def __str__(self):
