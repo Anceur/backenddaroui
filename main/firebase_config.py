@@ -1,19 +1,27 @@
-import json
 import os
+import json
 import firebase_admin
 from firebase_admin import credentials, storage
 
 def initialize_firebase():
+    """Initialize Firebase Admin SDK if not already initialized"""
     if not firebase_admin._apps:
-        cred = credentials.Certificate(
-            json.loads(os.environ["FIREBASE_SERVICE_ACCOUNT"])
-        )
-        bucket_name = os.environ.get("FIREBASE_BUCKET_NAME", "daroui.appspot.com")
-        firebase_admin.initialize_app(cred, {
-            "storageBucket": bucket_name
-        })
-        print(f"✅ Firebase initialized with bucket: {bucket_name}")
+        try:
+            # جلب بيانات الخدمة من متغير البيئة
+            service_account_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT")
+            if not service_account_json:
+                raise ValueError("FIREBASE_SERVICE_ACCOUNT environment variable not set")
+            
+            cred = credentials.Certificate(json.loads(service_account_json))
+            firebase_admin.initialize_app(cred, {
+                "storageBucket": "daroui.appspot.com"  # اسم bucket بالضبط كما هو في Firebase
+            })
+            print("✅ Firebase initialized successfully")
+        except Exception as e:
+            print(f"❌ Error initializing Firebase: {e}")
+            raise
 
 def get_storage_bucket():
+    """Get Firebase Storage bucket (ensure Firebase initialized)"""
     initialize_firebase()
     return storage.bucket()

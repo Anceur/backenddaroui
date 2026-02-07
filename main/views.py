@@ -4681,46 +4681,35 @@ class RestaurantInfoView(APIView):
 
 # ... الكود الموجود ...
 
-# main/views.py
-
 
 class MenuItemUploadImageView(APIView):
-    """
-    رفع صورة MenuItem إلى Firebase Storage
-    """
-    permission_classes = [AllowAny]  # يمكن تغييره لاحقاً إلى IsAdmin
+    """رفع صورة MenuItem إلى Firebase Storage"""
+    permission_classes = [AllowAny]
     parser_classes = (MultiPartParser, FormParser)
 
     def post(self, request):
         try:
-            # التحقق من وجود الصورة
             image_file = request.FILES.get('image')
             if not image_file:
                 return Response({"error": "No image file provided"}, status=status.HTTP_400_BAD_REQUEST)
 
-            # التحقق من نوع الملف
+            # تحقق من نوع الملف
             allowed_types = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp']
             if image_file.content_type not in allowed_types:
-                return Response({"error": "Invalid file type. Only JPEG, PNG, and WebP are allowed"}, 
-                                status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": "Invalid file type. Only JPEG, PNG, and WebP allowed"}, status=status.HTTP_400_BAD_REQUEST)
 
-            # التحقق من حجم الملف (5MB max)
+            # تحقق من حجم الملف (5MB max)
             if image_file.size > 5 * 1024 * 1024:
                 return Response({"error": "File size exceeds 5MB limit"}, status=status.HTTP_400_BAD_REQUEST)
 
-            # ضغط الصورة إذا لزم الأمر
+            # ضغط الصورة
             try:
                 img = Image.open(image_file)
-
-                # تحويل RGBA إلى RGB إذا لزم الأمر
                 if img.mode == 'RGBA':
                     img = img.convert('RGB')
-
-                # ضغط الصورة
                 output = io.BytesIO()
                 img.save(output, format='JPEG', quality=85, optimize=True)
                 output.seek(0)
-
                 file_to_upload = output
                 content_type = 'image/jpeg'
             except Exception as e:
@@ -4729,24 +4718,20 @@ class MenuItemUploadImageView(APIView):
                 file_to_upload = image_file
                 content_type = image_file.content_type
 
-            # رفع الصورة إلى Firebase Storage
+            # رفع الصورة إلى Firebase
             bucket = get_storage_bucket()
+            import time
             timestamp = int(time.time())
             filename = f"menu/{timestamp}-{image_file.name}"
             blob = bucket.blob(filename)
-
             blob.upload_from_file(file_to_upload, content_type=content_type)
-            blob.make_public()  # جعل الصورة عامة
-
+            blob.make_public()
             public_url = blob.public_url
-            logger.info(f"✅ Image uploaded successfully: {public_url}")
 
-            return Response({
-                "imageUrl": public_url,
-                "message": "Image uploaded successfully"
-            }, status=status.HTTP_200_OK)
+            logger.info(f"✅ Image uploaded successfully: {public_url}")
+            return Response({"imageUrl": public_url, "message": "Image uploaded successfully"}, status=status.HTTP_200_OK)
 
         except Exception as e:
             import traceback
-            logger.error(f"❌ Error uploading image: {e}\n{traceback.format_exc()}")
+            logger.error(f"❌ Error uploading image: {str(e)}\n{traceback.format_exc()}")
             return Response({"error": f"Failed to upload image: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
