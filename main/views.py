@@ -1,5 +1,16 @@
 from django.shortcuts import render
 from rest_framework_simplejwt.views import TokenObtainPairView
+
+
+
+import time
+from rest_framework.permissions import AllowAny
+from main.firebase_config import get_storage_bucket 
+
+logger = logging.getLogger(__name__)
+
+
+
 from .serializers import (
     CustomTokenObtainPairSerializer, ProfileSerializer, UserWithProfileSerializer, 
     OrderSerializer, MenuItemSerializer, MenuItemSizeSerializer, OrderItemSerializer,
@@ -4675,26 +4686,72 @@ class RestaurantInfoView(APIView):
 
 # ... الكود الموجود ...
 
-# أضف هذا الـ View الجديد:
-from main.firebase_config import get_storage_bucket
+# main/views.py
+
 
 class MenuItemUploadImageView(APIView):
+    """
+    رفع صورة MenuItem إلى Firebase Storage
+    """
+    permission_classes = [AllowAny]  # يمكن تغييره لاحقاً إلى IsAdmin
     parser_classes = (MultiPartParser, FormParser)
 
     def post(self, request):
         try:
+            # التحقق من وجود الصورة
             image_file = request.FILES.get('image')
             if not image_file:
-                return Response({"error": "No image file provided"}, status=400)
+                return Response({"error": "No image file provided"}, status=status.HTTP_400_BAD_REQUEST)
 
-            bucket = get_storage_bucket()  # ✅ يتم تهيئة Firebase هنا
-            filename = f"menu/{int(time.time())}-{image_file.name}"
+            # التحقق من نوع الملف
+            allowed_types = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp']
+            if image_file.content_type not in allowed_types:
+                return Response({"error": "Invalid file type. Only JPEG, PNG, and WebP are allowed"}, 
+                                status=status.HTTP_400_BAD_REQUEST)
+
+            # التحقق من حجم الملف (5MB max)
+            if image_file.size > 5 * 1024 * 1024:
+                return Response({"error": "File size exceeds 5MB limit"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # ضغط الصورة إذا لزم الأمر
+            try:
+                img = Image.open(image_file)
+
+                # تحويل RGBA إلى RGB إذا لزم الأمر
+                if img.mode == 'RGBA':
+                    img = img.convert('RGB')
+
+                # ضغط الصورة
+                output = io.BytesIO()
+                img.save(output, format='JPEG', quality=85, optimize=True)
+                output.seek(0)
+
+                file_to_upload = output
+                content_type = 'image/jpeg'
+            except Exception as e:
+                logger.warning(f"Could not compress image, uploading original: {e}")
+                image_file.seek(0)
+                file_to_upload = image_file
+                content_type = image_file.content_type
+
+            # رفع الصورة إلى Firebase Storage
+            bucket = get_storage_bucket()
+            timestamp = int(time.time())
+            filename = f"menu/{timestamp}-{image_file.name}"
             blob = bucket.blob(filename)
-            blob.upload_from_file(image_file, content_type=image_file.content_type)
-            blob.make_public()
 
-            return Response({"imageUrl": blob.public_url}, status=200)
+            blob.upload_from_file(file_to_upload, content_type=content_type)
+            blob.make_public()  # جعل الصورة عامة
+
+            public_url = blob.public_url
+            logger.info(f"✅ Image uploaded successfully: {public_url}")
+
+            return Response({
+                "imageUrl": public_url,
+                "message": "Image uploaded successfully"
+            }, status=status.HTTP_200_OK)
+
         except Exception as e:
             import traceback
-            print(f"❌ Error uploading image: {e}\n{traceback.format_exc()}")
-            return Response({"error": f"Failed to upload image: {str(e)}"}, status=500)
+            logger.error(f"❌ Error uploading image: {e}\n{traceback.format_exc()}")
+            return Response({"error": f"Failed to upload image: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
