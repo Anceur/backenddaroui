@@ -421,7 +421,7 @@ class MenuItemSerializer(serializers.ModelSerializer):
         username = serializers.CharField(source='user.username', read_only=True, required=False)
     
     class Meta:
-        model = Staff  # ✅ هنا صحيح
+        model = StaffMember  # ✅ هنا صحيح
         fields = '__all__'
     
     def validate_image(self, value):
