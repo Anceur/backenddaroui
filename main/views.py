@@ -9,6 +9,11 @@ from .serializers import (
     SupplierSerializer, SupplierHistorySerializer, ClientFideleSerializer, ExpenseSerializer,StaffMemberSerializer, PromotionSerializer, PromotionItemSerializer,
     RestaurantInfoSerializer
 )
+from rest_framework.parsers import MultiPartParser, FormParser
+from firebase_admin import storage as firebase_storage
+from PIL import Image
+import io
+
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.views import APIView
@@ -4663,3 +4668,91 @@ class RestaurantInfoView(APIView):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# في أعلى ملف views.py، أضف هذه الاستيرادات:
+
+
+# ... الكود الموجود ...
+
+# أضف هذا الـ View الجديد:
+
+class MenuItemUploadImageView(APIView):
+    """رفع صورة MenuItem إلى Firebase Storage"""
+    permission_classes = [AllowAny]  # يمكنك تغييره لـ IsAdmin لاحقاً
+    parser_classes = (MultiPartParser, FormParser)
+    
+    def post(self, request):
+        """رفع الصورة إلى Firebase وإرجاع الرابط"""
+        try:
+            # التحقق من وجود الصورة
+            image_file = request.FILES.get('image')
+            if not image_file:
+                return Response({
+                    'error': 'No image file provided'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # التحقق من نوع الملف
+            allowed_types = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp']
+            if image_file.content_type not in allowed_types:
+                return Response({
+                    'error': 'Invalid file type. Only JPEG, PNG, and WebP are allowed'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # التحقق من حجم الملف (5MB max)
+            if image_file.size > 5 * 1024 * 1024:
+                return Response({
+                    'error': 'File size exceeds 5MB limit'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # ضغط الصورة إذا لزم الأمر
+            try:
+                img = Image.open(image_file)
+                
+                # تحويل RGBA إلى RGB إذا لزم الأمر
+                if img.mode == 'RGBA':
+                    img = img.convert('RGB')
+                
+                # ضغط الصورة
+                output = io.BytesIO()
+                img.save(output, format='JPEG', quality=85, optimize=True)
+                output.seek(0)
+                
+                file_to_upload = output
+                content_type = 'image/jpeg'
+            except Exception as e:
+                logger.warning(f"Could not compress image, uploading original: {e}")
+                image_file.seek(0)
+                file_to_upload = image_file
+                content_type = image_file.content_type
+            
+            # رفع إلى Firebase Storage
+            bucket = firebase_storage.bucket()
+            timestamp = int(request.data.get('timestamp', 0)) if request.data.get('timestamp') else int(request.POST.get('timestamp', 0))
+            filename = f"menu/{timestamp}-{image_file.name}"
+            blob = bucket.blob(filename)
+            
+            blob.upload_from_file(
+                file_to_upload,
+                content_type=content_type
+            )
+            
+            # جعل الملف عام
+            blob.make_public()
+            
+            # الحصول على الرابط العام
+            public_url = blob.public_url
+            
+            logger.info(f"✅ Image uploaded successfully: {public_url}")
+            
+            return Response({
+                'imageUrl': public_url,
+                'message': 'Image uploaded successfully'
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            import traceback
+            logger.error(f"❌ Error uploading image: {str(e)}\n{traceback.format_exc()}")
+            return Response({
+                'error': f'Failed to upload image: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

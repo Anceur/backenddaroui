@@ -43,7 +43,7 @@ from .views_table_session import (
 from .views_cashier_history import CashierOrderHistoryView
 from .views_cashier_decline import CashierDeclineOrderView
 from .views_public_status import PublicRestaurantStatusView
-
+from .views import MenuItemUploadImageView
 urlpatterns = [
     # ... existing patterns ...
     path('login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
@@ -179,4 +179,18 @@ urlpatterns = [
     path('promotions/<int:pk>/', PromotionDetailView.as_view(), name='promotion-detail'),
     path('restaurant-settings/', RestaurantInfoView.as_view(), name='restaurant-settings'),
     path('public/restaurant-status/', PublicRestaurantStatusView.as_view(), name='public_restaurant_status'),
+]
+
+
+# في ملف urls.py، أضف هذا الاستيراد في الأعلى:
+
+
+# ثم أضف هذا المسار في urlpatterns:
+urlpatterns = [
+    # ... المسارات الموجودة ...
+    
+    # Menu Item Image Upload endpoint
+    path('menu-items/upload-image/', MenuItemUploadImageView.as_view(), name='menu_item_upload_image'),
+    
+    # ... باقي المسارات ...
 ]
