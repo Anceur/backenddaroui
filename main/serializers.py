@@ -399,9 +399,9 @@ class MenuItemSizeSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 # MenuItemSerializer
     class MenuItemSerializer(serializers.ModelSerializer):
-    image = serializers.CharField(required=False, allow_blank=True, allow_null=True)  # ✅ سطر واحد فقط
-    sizes = MenuItemSizeSerializer(many=True, read_only=True)
-    cost_price = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, allow_null=True)
+        image = serializers.CharField(required=False, allow_blank=True, allow_null=True)  # ✅ سطر واحد فقط
+        sizes = MenuItemSizeSerializer(many=True, read_only=True)
+        cost_price = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, allow_null=True)
     
     class Meta:
         model = MenuItem
