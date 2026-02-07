@@ -398,8 +398,13 @@ class MenuItemSizeSerializer(serializers.ModelSerializer):
             validated_data['cost_price'] = 0.00
         return super().update(instance, validated_data)
 # MenuItemSerializer
+    class MenuItemSizeSerializer(serializers.ModelSerializer):
+       class Meta:
+            model = MenuItemSize
+            fields = '__all__'
+
     class MenuItemSerializer(serializers.ModelSerializer):
-        image = serializers.CharField(required=False, allow_blank=True, allow_null=True)  # ✅ سطر واحد فقط
+        image = serializers.CharField(required=False, allow_blank=True, allow_null=True)
         sizes = MenuItemSizeSerializer(many=True, read_only=True)
         cost_price = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, allow_null=True)
     
@@ -410,7 +415,7 @@ class MenuItemSizeSerializer(serializers.ModelSerializer):
     def validate_image(self, value):
         if isinstance(value, str):
             if value and not value.startswith('http'):
-                raise serializers.ValidationError("رابط صورة غير صالح")
+                raise serializers.ValidationError("Invalid image URL")
             return value
         return value
 
@@ -427,9 +432,9 @@ class MenuItemSizeSerializer(serializers.ModelSerializer):
     def validate_image(self, value):
         if isinstance(value, str):
             if value and not value.startswith('http'):
-                raise serializers.ValidationError("رابط صورة غير صالح")
+                raise serializers.ValidationError("Invalid image URL")
             return value
-        return value    
+        return value
     class Meta:
         model = MenuItem
         fields = ['id', 'name', 'description', 'price', 'cost_price', 'category', 'image', 'featured', 'sizes']
