@@ -8,12 +8,12 @@ def initialize_firebase():
         cred = credentials.Certificate(
             json.loads(os.environ["FIREBASE_SERVICE_ACCOUNT"])
         )
+        bucket_name = os.environ.get("FIREBASE_BUCKET_NAME", "daroui.appspot.com")
         firebase_admin.initialize_app(cred, {
-            "storageBucket": "daroui.appspot.com"
+            "storageBucket": bucket_name
         })
-        print("✅ Firebase initialized")
+        print(f"✅ Firebase initialized with bucket: {bucket_name}")
 
 def get_storage_bucket():
-    # تأكد أن Firebase تم تهيئته قبل أي استخدام
     initialize_firebase()
     return storage.bucket()
