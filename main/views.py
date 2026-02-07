@@ -4676,24 +4676,23 @@ class RestaurantInfoView(APIView):
 # ... الكود الموجود ...
 
 # أضف هذا الـ View الجديد:
-
-from backend.firebase_config import get_storage_bucket
+from main.firebase_config import get_storage_bucket
 
 class MenuItemUploadImageView(APIView):
     parser_classes = (MultiPartParser, FormParser)
-    
+
     def post(self, request):
         try:
             image_file = request.FILES.get('image')
             if not image_file:
                 return Response({"error": "No image file provided"}, status=400)
-            
-            bucket = get_storage_bucket()  # ✅ استخدام الدالة
+
+            bucket = get_storage_bucket()  # ✅ يتم تهيئة Firebase هنا
             filename = f"menu/{int(time.time())}-{image_file.name}"
             blob = bucket.blob(filename)
             blob.upload_from_file(image_file, content_type=image_file.content_type)
             blob.make_public()
-            
+
             return Response({"imageUrl": blob.public_url}, status=200)
         except Exception as e:
             import traceback
