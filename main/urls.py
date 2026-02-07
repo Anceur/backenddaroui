@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import PromotionListCreateView, PromotionDetailView, PublicPromotionListView
+from .views import PromotionListCreateView, PromotionDetailView, PublicPromotionListView, StaffUploadImageView
 from .views import CustomTokenObtainPairView
 from .views import CheckAuthenticatedView, ReturnRole,LogoutView,ReturnUser,ChangePasswordView
 from .views import ProfileView, CreateUserWithProfileView
@@ -180,6 +180,8 @@ urlpatterns = [
     path('restaurant-settings/', RestaurantInfoView.as_view(), name='restaurant-settings'),
     path('public/restaurant-status/', PublicRestaurantStatusView.as_view(), name='public_restaurant_status'),
 
+
+    path('staff/upload-image/', StaffUploadImageView.as_view(), name='staff_upload_image'),
     path('menu-items/upload-image/', MenuItemUploadImageView.as_view(), name='menu_item_upload_image'),
 ]
 

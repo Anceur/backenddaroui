@@ -4735,3 +4735,60 @@ class MenuItemUploadImageView(APIView):
             import traceback
             logger.error(f"❌ Error uploading image: {str(e)}\n{traceback.format_exc()}")
             return Response({"error": f"Failed to upload image: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+class StaffUploadImageView(APIView):
+    """رفع صورة Staff إلى Firebase Storage"""
+    permission_classes = [AllowAny]
+    parser_classes = (MultiPartParser, FormParser)
+
+    def post(self, request):
+        try:
+            image_file = request.FILES.get('image')
+            if not image_file:
+                return Response({"error": "No image file provided"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # تحقق من نوع الملف
+            allowed_types = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp']
+            if image_file.content_type not in allowed_types:
+                return Response({"error": "Invalid file type. Only JPEG, PNG, and WebP allowed"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # تحقق من حجم الملف (5MB max)
+            if image_file.size > 5 * 1024 * 1024:
+                return Response({"error": "File size exceeds 5MB limit"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # ضغط الصورة
+            try:
+                img = Image.open(image_file)
+                if img.mode == 'RGBA':
+                    img = img.convert('RGB')
+                output = io.BytesIO()
+                img.save(output, format='JPEG', quality=85, optimize=True)
+                output.seek(0)
+                file_to_upload = output
+                content_type = 'image/jpeg'
+            except Exception as e:
+                logger.warning(f"Could not compress image, uploading original: {e}")
+                image_file.seek(0)
+                file_to_upload = image_file
+                content_type = image_file.content_type
+
+            # رفع الصورة إلى Firebase
+            bucket = get_storage_bucket()
+            import time
+            timestamp = int(time.time())
+            filename = f"staff/{timestamp}-{image_file.name}"  # 🔥 مجلد staff وليس menu
+            blob = bucket.blob(filename)
+            blob.upload_from_file(file_to_upload, content_type=content_type)
+            blob.make_public()
+            public_url = blob.public_url
+
+            logger.info(f"✅ Staff image uploaded successfully: {public_url}")
+            return Response({"imageUrl": public_url, "message": "Image uploaded successfully"}, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            import traceback
+            logger.error(f"❌ Error uploading staff image: {str(e)}\n{traceback.format_exc()}")
+            return Response({"error": f"Failed to upload image: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

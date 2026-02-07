@@ -413,6 +413,20 @@ class MenuItemSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("رابط صورة غير صالح")
             return value
         return value
+    
+    image = serializers.CharField(required=False, allow_blank=True, allow_null=True)  # 🔥 نفس menu-item
+    
+    class Meta:
+        model = Staff
+        fields = '__all__'
+    
+    def validate_image(self, value):
+        # نقبل روابط URL فقط
+        if isinstance(value, str):
+            if value and not value.startswith('http'):
+                raise serializers.ValidationError("رابط صورة غير صالح")
+            return value
+        return value
 
     sizes = MenuItemSizeSerializer(many=True, read_only=True)
     cost_price = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, allow_null=True)
