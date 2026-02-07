@@ -4779,7 +4779,7 @@ class StaffUploadImageView(APIView):
             bucket = get_storage_bucket()
             import time
             timestamp = int(time.time())
-            filename = f"staff/{timestamp}-{image_file.name}"  # 🔥 مجلد staff وليس menu
+            filename = f"staff/{timestamp}-{image_file.name}"
             blob = bucket.blob(filename)
             blob.upload_from_file(file_to_upload, content_type=content_type)
             blob.make_public()
