@@ -397,40 +397,39 @@ class MenuItemSizeSerializer(serializers.ModelSerializer):
         if 'cost_price' in validated_data and validated_data.get('cost_price') is None:
             validated_data['cost_price'] = 0.00
         return super().update(instance, validated_data)
-class MenuItemSerializer(serializers.ModelSerializer):
-
-    image = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    image = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+# MenuItemSerializer
+    class MenuItemSerializer(serializers.ModelSerializer):
+    image = serializers.CharField(required=False, allow_blank=True, allow_null=True)  # ✅ سطر واحد فقط
+    sizes = MenuItemSizeSerializer(many=True, read_only=True)
+    cost_price = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, allow_null=True)
     
     class Meta:
         model = MenuItem
         fields = '__all__'
     
     def validate_image(self, value):
-       
-        if isinstance(value, str):
-            if value and not value.startswith('http'):
-                raise serializers.ValidationError("رابط صورة غير صالح")
-            return value
-        return value
-    
-    image = serializers.CharField(required=False, allow_blank=True, allow_null=True)  # 🔥 نفس menu-item
-    
-    class Meta:
-        model = Staff
-        fields = '__all__'
-    
-    def validate_image(self, value):
-        # نقبل روابط URL فقط
         if isinstance(value, str):
             if value and not value.startswith('http'):
                 raise serializers.ValidationError("رابط صورة غير صالح")
             return value
         return value
 
-    sizes = MenuItemSizeSerializer(many=True, read_only=True)
-    cost_price = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, allow_null=True)
+
+# StaffSerializer - خارج MenuItemSerializer تماماً! ⚠️
+    class StaffSerializer(serializers.ModelSerializer):
+    image = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    username = serializers.CharField(source='user.username', read_only=True, required=False)
     
+    class Meta:
+        model = Staff
+        fields = '__all__'
+    
+    def validate_image(self, value):
+        if isinstance(value, str):
+            if value and not value.startswith('http'):
+                raise serializers.ValidationError("رابط صورة غير صالح")
+            return value
+        return value    
     class Meta:
         model = MenuItem
         fields = ['id', 'name', 'description', 'price', 'cost_price', 'category', 'image', 'featured', 'sizes']
