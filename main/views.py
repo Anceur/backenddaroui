@@ -4682,6 +4682,12 @@ class RestaurantInfoView(APIView):
 # ... الكود الموجود ...
 
 
+
+def get_storage_bucket():
+    client = storage.Client()
+    bucket = client.bucket("daroui.appspot.com")
+    return bucket
+
 class MenuItemUploadImageView(APIView):
     """رفع صورة MenuItem إلى Firebase Storage"""
     permission_classes = [AllowAny]
@@ -4696,11 +4702,7 @@ class MenuItemUploadImageView(APIView):
             # تحقق من نوع الملف
             allowed_types = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp']
             if image_file.content_type not in allowed_types:
-                return Response({"error": "Invalid file type. Only JPEG, PNG, and WebP allowed"}, status=status.HTTP_400_BAD_REQUEST)
-
-            # تحقق من حجم الملف (5MB max)
-            if image_file.size > 5 * 1024 * 1024:
-                return Response({"error": "File size exceeds 5MB limit"}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": "Invalid file type"}, status=status.HTTP_400_BAD_REQUEST)
 
             # ضغط الصورة
             try:
@@ -4725,13 +4727,12 @@ class MenuItemUploadImageView(APIView):
             filename = f"menu/{timestamp}-{image_file.name}"
             blob = bucket.blob(filename)
             blob.upload_from_file(file_to_upload, content_type=content_type)
-            blob.make_public()
+            blob.make_public()  # مهم جدًا لجعل الصورة متاحة للعامة
             public_url = blob.public_url
 
-            logger.info(f"✅ Image uploaded successfully: {public_url}")
             return Response({"imageUrl": public_url, "message": "Image uploaded successfully"}, status=status.HTTP_200_OK)
 
         except Exception as e:
             import traceback
-            logger.error(f"❌ Error uploading image: {str(e)}\n{traceback.format_exc()}")
+            logger.error(f"Error uploading image: {str(e)}\n{traceback.format_exc()}")
             return Response({"error": f"Failed to upload image: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
