@@ -6,11 +6,6 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 import time
 from rest_framework.permissions import AllowAny
 from main.firebase_config import get_storage_bucket 
-
-logger = logging.getLogger(__name__)
-
-
-
 from .serializers import (
     CustomTokenObtainPairSerializer, ProfileSerializer, UserWithProfileSerializer, 
     OrderSerializer, MenuItemSerializer, MenuItemSizeSerializer, OrderItemSerializer,
