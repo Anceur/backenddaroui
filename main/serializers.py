@@ -417,8 +417,8 @@ class MenuItemSizeSerializer(serializers.ModelSerializer):
 
 # StaffSerializer - خارج MenuItemSerializer تماماً! ⚠️
     class StaffSerializer(serializers.ModelSerializer):
-    image = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    username = serializers.CharField(source='user.username', read_only=True, required=False)
+        image = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+        username = serializers.CharField(source='user.username', read_only=True, required=False)
     
     class Meta:
         model = Staff
