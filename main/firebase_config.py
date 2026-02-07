@@ -14,7 +14,7 @@ def initialize_firebase():
             
             cred = credentials.Certificate(json.loads(service_account_json))
             firebase_admin.initialize_app(cred, {
-                "storageBucket": "daroui.appspot.com"  # اسم bucket بالضبط كما هو في Firebase
+              "storageBucket": "daroui.firebasestorage.app" 
             })
             print("✅ Firebase initialized successfully")
         except Exception as e:
