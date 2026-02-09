@@ -856,6 +856,13 @@ class PublicOrderCreateView(APIView):
             if 'status' not in order_data:
                 order_data['status'] = 'Pending'
             
+            # Ensure tax_amount is set correctly based on order type (takeaway = 0, delivery = 100)
+            target_order_type = order_data.get('order_type') or order_data.get('orderType', 'delivery')
+            if target_order_type == 'takeaway':
+                order_data['tax_amount'] = 0.00
+            elif 'tax_amount' not in order_data and 'taxAmount' not in order_data:
+                order_data['tax_amount'] = 100.00
+            
             # Handle empty loyalty_number strings - convert to None
             if 'loyalty_number' in order_data:
                 loyalty_number = order_data.get('loyalty_number', '').strip()

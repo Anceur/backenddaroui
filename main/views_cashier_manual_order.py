@@ -162,8 +162,8 @@ class CashierManualOrderCreateView(APIView):
                         'details': str(e)
                     }, status=status.HTTP_400_BAD_REQUEST)
             
-            # Fixed tax for online orders
-            tax_amount = Decimal('100.00')
+            # Fixed tax for online orders (delivery only)
+            tax_amount = Decimal('100.00') if order_type == 'delivery' else Decimal('0.00')
             total = subtotal + tax_amount
             
             # Handle loyalty number
