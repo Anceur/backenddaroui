@@ -135,8 +135,13 @@ class CashierManualOrderCreateView(APIView):
                     subtotal += item_subtotal
                     revenue += item_revenue
                     
-                    # Add to items list
-                    items_list.append(f"{menu_item.name}{size_str} x{quantity}")
+                    # Add to items list as object instead of string for better ticket printing
+                    items_list.append({
+                        'name': menu_item.name,
+                        'size': size.size if size else None,
+                        'quantity': quantity,
+                        'price': float(item_price)
+                    })
                     
                     # Prepare OrderItem data
                     order_items_to_create.append({

@@ -313,11 +313,31 @@ class OrderSerializer(serializers.ModelSerializer):
     
     def to_representation(self, instance):
         """Custom representation to format fields"""
+        # Ensure we prefetch efficiently if not already done
         representation = super().to_representation(instance)
         
         # Add formatted fields
         representation['orderType'] = instance.order_type
         representation['tableNumber'] = instance.table_number or ''
+        
+        # Enrich items from OrderItem model if they exist (provides better data than JSONField)
+        order_items = instance.orderitem_set.all()
+        if order_items.exists():
+            rich_items = []
+            for item in order_items:
+                # Handle cases where item or size might be deleted/null
+                item_name = item.item.name if item.item else "Unknown Item"
+                size_name = item.size.size if item.size else None
+                price = str(item.size.price if item.size else (item.item.price if item.item else "0.00"))
+                
+                rich_items.append({
+                    'name': item_name,
+                    'quantity': item.quantity,
+                    'price': price,
+                    'size': size_name
+                })
+            # Overwrite representation items with better structured data
+            representation['items'] = rich_items
         
         # Add loyal_customer as nested object if it exists
         if instance.loyal_customer:

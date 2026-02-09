@@ -517,7 +517,7 @@ class OrderDetailView(APIView):
                 order_id = order_id.replace('#', '').strip()
             order_id = int(order_id)
             
-            order = Order.objects.get(id=order_id)
+            order = Order.objects.select_related('loyal_customer').prefetch_related('orderitem_set__item', 'orderitem_set__size').get(id=order_id)
             
             # If user is chef, only allow access to Pending/Preparing/Ready orders
             # But also allow access if they're trying to update it (for status transitions)
@@ -841,7 +841,13 @@ class PublicOrderCreateView(APIView):
                             item_name = item.get('name', '')
                             quantity = item.get('quantity', 1)
                             if item_name:
-                                items_list.append(f"{item_name} x{quantity}")
+                                # Save as object with price info for better ticket printing fallback
+                                items_list.append({
+                                    'name': item_name,
+                                    'quantity': quantity,
+                                    'price': item.get('price', 0),
+                                    'size': item.get('size')
+                                })
                         order_data['items'] = items_list
             
             # Set default values
@@ -3284,12 +3290,22 @@ class CashierConfirmOrderView(APIView):
                                         'quantity': item.get('quantity', 1),
                                         'price': str(item.get('price', 0)),
                                     }
-                                else:
-                                    # If item is just a string
+                                    # If item is just a string, try to extract quantity
+                                    qty = 1
+                                    display_name = str(item)
+                                    try:
+                                        if ' x' in display_name:
+                                            parts = display_name.rsplit(' x', 1)
+                                            if len(parts) == 2 and parts[1].strip().isdigit():
+                                                display_name = parts[0].strip()
+                                                qty = int(parts[1].strip())
+                                    except Exception:
+                                        pass
+                                        
                                     item_data = {
-                                        'name': str(item),
+                                        'name': display_name,
                                         'size': None,
-                                        'quantity': 1,
+                                        'quantity': qty,
                                         'price': '0.00',
                                     }
                                 items_data.append(item_data)
@@ -3561,11 +3577,22 @@ class OrderTicketPrintView(APIView):
                                     'price': str(item.get('price', 0)),
                                 }
                             else:
-                                # If item is just a string
+                                # If item is just a string, try to extract quantity
+                                qty = 1
+                                display_name = str(item)
+                                try:
+                                    if ' x' in display_name:
+                                        parts = display_name.rsplit(' x', 1)
+                                        if len(parts) == 2 and parts[1].strip().isdigit():
+                                            display_name = parts[0].strip()
+                                            qty = int(parts[1].strip())
+                                except Exception:
+                                    pass
+                                    
                                 item_data = {
-                                    'name': str(item),
+                                    'name': display_name,
                                     'size': None,
-                                    'quantity': 1,
+                                    'quantity': qty,
                                     'price': '0.00',
                                 }
                             items_data.append(item_data)

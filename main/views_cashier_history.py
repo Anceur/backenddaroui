@@ -38,7 +38,7 @@ class CashierOrderHistoryView(APIView):
                 offline_filter &= Q(created_at__day=day)
             
             # Get orders
-            online_orders = Order.objects.filter(online_filter).select_related('loyal_customer').order_by('-created_at')
+            online_orders = Order.objects.filter(online_filter).select_related('loyal_customer').prefetch_related('orderitem_set__item', 'orderitem_set__size').order_by('-created_at')
             offline_orders = OfflineOrder.objects.filter(offline_filter).select_related('table').prefetch_related('items__item', 'items__size').order_by('-created_at')
             
             online_serializer = OrderSerializer(online_orders, many=True)
