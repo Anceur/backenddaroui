@@ -121,7 +121,7 @@ class CashierManualOrderCreateView(APIView):
                     # If strictly required, we'd fail here. Assuming robust logic:
                     
                     if size:
-                        item_price = size.sell_price
+                        item_price = size.price
                         item_cost = size.cost_price
                         size_str = f" ({size.size})"
                     else:
