@@ -2628,6 +2628,9 @@ class MenuItemMovementView(APIView):
 
     def get(self, request):
         try:
+            start_date_str = request.query_params.get('start_date')
+            end_date_str = request.query_params.get('end_date')
+            
             today = timezone.now().date()
             start_of_month = today.replace(day=1)
             start_of_year = today.replace(month=1, day=1)
@@ -2635,46 +2638,57 @@ class MenuItemMovementView(APIView):
             successful_online_statuses = ['Confirmed', 'Preparing', 'Ready', 'Delivered']
             successful_offline_statuses = ['Confirmed', 'Ready', 'Served', 'Paid']
 
+            # Base filters
+            online_items = OrderItem.objects.filter(order__status__in=successful_online_statuses)
+            offline_items = OfflineOrderItem.objects.filter(offline_order__status__in=successful_offline_statuses)
+
+            # Performance: pre-calculate period filter if provided
+            period_filter_online = Q()
+            period_filter_offline = Q()
+            has_period = False
+            
+            if start_date_str and end_date_str:
+                try:
+                    start_date = timezone.datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                    end_date = timezone.datetime.strptime(end_date_str, '%Y-%m-%d').date()
+                    period_filter_online = Q(order__created_at__date__range=[start_date, end_date])
+                    period_filter_offline = Q(offline_order__created_at__date__range=[start_date, end_date])
+                    has_period = True
+                except (ValueError, TypeError):
+                    pass
+
             # Aggregated online movement
-            online_mov = OrderItem.objects.filter(
-                order__status__in=successful_online_statuses
-            ).values('item_id').annotate(
+            online_mov = online_items.values('item_id').annotate(
                 today_qty=Sum('quantity', filter=Q(order__created_at__date=today)),
                 month_qty=Sum('quantity', filter=Q(order__created_at__date__gte=start_of_month)),
-                year_qty=Sum('quantity', filter=Q(order__created_at__date__gte=start_of_year))
+                year_qty=Sum('quantity', filter=Q(order__created_at__date__gte=start_of_year)),
+                period_qty=Sum('quantity', filter=period_filter_online) if has_period else Value(0, output_field=IntegerField())
             )
 
             # Aggregated offline movement
-            offline_mov = OfflineOrderItem.objects.filter(
-                offline_order__status__in=successful_offline_statuses
-            ).values('item_id').annotate(
+            offline_mov = offline_items.values('item_id').annotate(
                 today_qty=Sum('quantity', filter=Q(offline_order__created_at__date=today)),
                 month_qty=Sum('quantity', filter=Q(offline_order__created_at__date__gte=start_of_month)),
-                year_qty=Sum('quantity', filter=Q(offline_order__created_at__date__gte=start_of_year))
+                year_qty=Sum('quantity', filter=Q(offline_order__created_at__date__gte=start_of_year)),
+                period_qty=Sum('quantity', filter=period_filter_offline) if has_period else Value(0, output_field=IntegerField())
             )
 
             # Map for combining
-            stats = {} # item_id -> {today, month, year}
+            stats = {} # item_id -> {today, month, year, period}
 
-            for item in online_mov:
-                stats[item['item_id']] = {
-                    'today': int(item['today_qty'] or 0),
-                    'month': int(item['month_qty'] or 0),
-                    'year': int(item['year_qty'] or 0)
-                }
-
-            for item in offline_mov:
-                id = item['item_id']
-                if id in stats:
+            def update_stats(mov_data, is_online=True):
+                for item in mov_data:
+                    id = item['item_id']
+                    if id not in stats:
+                        stats[id] = {'today': 0, 'month': 0, 'year': 0, 'period': 0}
+                    
                     stats[id]['today'] += int(item['today_qty'] or 0)
                     stats[id]['month'] += int(item['month_qty'] or 0)
                     stats[id]['year'] += int(item['year_qty'] or 0)
-                else:
-                    stats[id] = {
-                        'today': int(item['today_qty'] or 0),
-                        'month': int(item['month_qty'] or 0),
-                        'year': int(item['year_qty'] or 0)
-                    }
+                    stats[id]['period'] += int(item['period_qty'] or 0)
+
+            update_stats(online_mov)
+            update_stats(offline_mov)
 
             # Get all menu items
             menu_items = MenuItem.objects.all().values('id', 'name', 'category', 'price', 'cost_price')
@@ -2682,7 +2696,7 @@ class MenuItemMovementView(APIView):
             result = []
             for item in menu_items:
                 id = item['id']
-                move = stats.get(id, {'today': 0, 'month': 0, 'year': 0})
+                move = stats.get(id, {'today': 0, 'month': 0, 'year': 0, 'period': 0})
                 result.append({
                     'id': id,
                     'name': item['name'],
@@ -2691,7 +2705,8 @@ class MenuItemMovementView(APIView):
                     'cost_price': float(item['cost_price']),
                     'today': move['today'],
                     'month': move['month'],
-                    'year': move['year']
+                    'year': move['year'],
+                    'period': move['period']
                 })
 
             return Response(result, status=status.HTTP_200_OK)
