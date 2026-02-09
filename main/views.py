@@ -96,11 +96,48 @@ class CheckAuthenticatedView(APIView):
     def get(self, request):
         return Response({'message': 'You are authenticated'}, status=status.HTTP_200_OK)
 class LogoutView(APIView):
-    permission_classes = [IsAuthenticated ]
+    permission_classes = [IsAuthenticated]
+
     def post(self, request):
+        try:
+            refresh_token = request.data.get("refresh_token")
+            # If not in body, try cookies because it might be HttpOnly
+            if not refresh_token:
+                refresh_token = request.COOKIES.get('refresh_token')
+                
+            if refresh_token:
+                from rest_framework_simplejwt.tokens import RefreshToken
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+        except Exception:
+            pass
+
         response = Response({'message': 'You are logged out'}, status=status.HTTP_200_OK)
-        response.delete_cookie('access_token')
-        response.delete_cookie('refresh_token')
+        
+        # Determine cookie settings based on environment (must match login settings)
+        is_secure = not django_settings.DEBUG
+        samesite_val = "Lax" if django_settings.DEBUG else "None"
+        
+        # Use set_cookie to manually delete with correct attributes (especially secure for SameSite=None)
+        response.set_cookie(
+            key='access_token',
+            value='',
+            max_age=0,
+            expires='Thu, 01 Jan 1970 00:00:00 GMT',
+            secure=is_secure,
+            httponly=True,
+            samesite=samesite_val
+        )
+        response.set_cookie(
+            key='refresh_token',
+            value='',
+            max_age=0,
+            expires='Thu, 01 Jan 1970 00:00:00 GMT',
+            secure=is_secure,
+            httponly=True,
+            samesite=samesite_val
+        )
+        
         return response
 
 class ReturnRole(APIView):
