@@ -215,6 +215,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "https://frontenddaroui.onrender.com",
     "https://www.frontenddaroui.onrender.com",
+    "https://nostalgie-draoui.com",
+    "https://www.nostalgie-draoui.com",
 ]
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
@@ -222,6 +224,8 @@ CSRF_TRUSTED_ORIGINS = [
     "https://frontenddaroui.onrender.com",
     "https://www.frontenddaroui.onrender.com",
     "https://backenddaroui.onrender.com",
+    "https://nostalgie-draoui.com",
+    "https://www.nostalgie-draoui.com",
 ]
 
 # ==========================
