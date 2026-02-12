@@ -213,13 +213,15 @@ CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://frontenddaroui.onrender.com",  
+    "https://frontenddaroui.onrender.com",
+    "https://www.frontenddaroui.onrender.com",
 ]
 CSRF_TRUSTED_ORIGINS = [
-    # Deployment origin (commented for local development)
-    # "https://backend-django-5ssb.onrender.com",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://frontenddaroui.onrender.com",
+    "https://www.frontenddaroui.onrender.com",
+    "https://backenddaroui.onrender.com",
 ]
 
 # ==========================
