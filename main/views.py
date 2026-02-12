@@ -818,13 +818,14 @@ class PublicOrderCreateView(APIView):
                     }, status=status.HTTP_403_FORBIDDEN)
             else:
                 # Basic rate limiting without full security token validation
+                # More lenient limit for customers without tokens
                 ip_address = OrderSecurityValidator.get_client_ip(request)
-                is_allowed, remaining, reset_time = OrderSecurityValidator.check_rate_limit(ip_address, max_requests=10, window_seconds=60)
+                is_allowed, remaining, reset_time = OrderSecurityValidator.check_rate_limit(ip_address, max_requests=20, window_seconds=60)
                 if not is_allowed:
                     logger.warning(f"Order submission rate limited (no token): IP: {ip_address}")
                     return Response({
-                        'error': 'Rate limit exceeded',
-                        'details': 'Too many order attempts. Please wait before trying again.'
+                        'error': 'Too many order attempts',
+                        'details': 'You have placed too many orders recently. Please wait a moment before trying again.'
                     }, status=status.HTTP_429_TOO_MANY_REQUESTS)
             
             # Store original items data BEFORE converting to strings (needed for OrderItem creation)

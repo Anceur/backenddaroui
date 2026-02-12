@@ -36,10 +36,13 @@ class OrderSecurityValidator:
         return hashlib.sha256(fingerprint_string.encode()).hexdigest()[:16]
     
     @staticmethod
-    def check_rate_limit(ip_address, max_requests=5, window_seconds=60):
+    def check_rate_limit(ip_address, max_requests=15, window_seconds=60):
         """
         Check if IP has exceeded rate limit
         Returns: (is_allowed, remaining_requests, reset_time)
+        
+        Increased to 15 requests per minute to accommodate legitimate customers
+        who may need to place multiple orders or retry after errors
         """
         cache_key = f'order_rate_limit_{ip_address}'
         current_count = cache.get(cache_key, 0)
@@ -69,10 +72,12 @@ class OrderSecurityValidator:
         return True
     
     @staticmethod
-    def validate_timestamp(token_data, min_seconds=1.0, max_seconds=3600):
+    def validate_timestamp(token_data, min_seconds=0.3, max_seconds=3600):
         """
         Validate that form was filled in reasonable time
         token_data should contain 'timestamp' field
+        
+        Reduced minimum time to 0.3s to allow faster legitimate submissions
         """
         if not token_data or 'timestamp' not in token_data:
             return False, "Missing timestamp"
@@ -84,11 +89,11 @@ class OrderSecurityValidator:
             
             if elapsed < min_seconds:
                 logger.warning(f"Order submitted too quickly ({elapsed:.2f}s) - possible bot")
-                return False, f"Please wait at least {min_seconds} seconds before submitting"
+                return False, f"Please wait a moment before submitting your order"
             
             if elapsed > max_seconds:
                 logger.warning(f"Order submitted too late ({elapsed:.2f}s) - possible expired session")
-                return False, "Session expired. Please refresh and try again"
+                return False, "Your session has expired. Please refresh the page and try again"
             
             return True, None
         except (ValueError, TypeError):
@@ -99,6 +104,8 @@ class OrderSecurityValidator:
         """
         Validate security token to prevent replay attacks
         Token should contain: timestamp, nonce, and signature
+        
+        Allows nonce reuse within 5 minutes to support retries
         """
         if not token_data:
             return False, "Missing security token"
@@ -108,15 +115,19 @@ class OrderSecurityValidator:
             if field not in token_data:
                 return False, f"Missing required field: {field}"
         
-        # Validate nonce hasn't been used before (prevent replay)
+        # Validate nonce hasn't been overused (allow some reuse for retries)
         nonce = token_data['nonce']
         nonce_key = f'order_nonce_{nonce}'
-        if cache.get(nonce_key):
-            logger.warning(f"Reused nonce detected - possible replay attack")
-            return False, "Invalid security token"
+        nonce_count = cache.get(nonce_key, 0)
         
-        # Store nonce for 1 hour
-        cache.set(nonce_key, True, 3600)
+        # Allow up to 3 uses of the same nonce within 5 minutes
+        # This helps customers who encounter errors or want to retry
+        if nonce_count >= 3:
+            logger.warning(f"Nonce used too many times ({nonce_count}) - possible replay attack")
+            return False, "This security token has been used too many times. Please refresh the page"
+        
+        # Increment nonce usage counter (expires in 5 minutes)
+        cache.set(nonce_key, nonce_count + 1, 300)
         
         # Validate signature (optional - can be enhanced)
         # For now, just check that signature exists and is reasonable length
@@ -205,19 +216,22 @@ class OrderSecurityValidator:
         """
         Comprehensive validation of order submission
         Returns: (is_valid, error_message, error_details)
+        
+        Relaxed validation to prevent blocking legitimate customers
+        while still protecting against bots
         """
         errors = []
         
-        # 1. Rate limiting
+        # 1. Rate limiting (increased to 15 requests per minute)
         ip_address = cls.get_client_ip(request)
-        is_allowed, remaining, reset_time = cls.check_rate_limit(ip_address, max_requests=5, window_seconds=60)
+        is_allowed, remaining, reset_time = cls.check_rate_limit(ip_address, max_requests=15, window_seconds=60)
         if not is_allowed:
             errors.append({
                 'type': 'rate_limit',
-                'message': 'Too many order attempts. Please wait before trying again.',
+                'message': 'You have placed too many orders recently. Please wait a moment before trying again.',
                 'reset_time': reset_time
             })
-            return False, "Rate limit exceeded", errors
+            return False, "Too many order attempts", errors
         
         # 2. Honeypot check
         if not cls.check_honeypot(order_data):
@@ -236,8 +250,8 @@ class OrderSecurityValidator:
             })
             return False, "Security validation failed", errors
         
-        # 4. Timestamp validation
-        is_valid_time, time_error = cls.validate_timestamp(security_token_data, min_seconds=0.5, max_seconds=3600)
+        # 4. Timestamp validation (reduced minimum to 0.3s)
+        is_valid_time, time_error = cls.validate_timestamp(security_token_data, min_seconds=0.3, max_seconds=3600)
         if not is_valid_time:
             errors.append({
                 'type': 'timestamp',
@@ -245,7 +259,7 @@ class OrderSecurityValidator:
             })
             return False, "Security validation failed", errors
         
-        # 5. Security token validation
+        # 5. Security token validation (allows nonce reuse up to 3 times)
         is_valid_token, token_error = cls.validate_security_token(security_token_data)
         if not is_valid_token:
             errors.append({
