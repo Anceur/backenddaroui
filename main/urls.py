@@ -16,6 +16,7 @@ from .views import (
 from .views import (
     MenuItemListCreateView, MenuItemDetailView, PublicMenuItemListView,
     MenuItemSizeListCreateView, MenuItemSizeDetailView,
+    MenuItemExtraListCreateView, MenuItemExtraDetailView,
     OrderItemListCreateView, OrderItemDetailView,
     IngredientListCreateView, IngredientDetailView,
     MenuItemIngredientListCreateView, MenuItemIngredientDetailView,
@@ -128,6 +129,10 @@ urlpatterns = [
     # MenuItemSize endpoints
     path('menu-item-sizes/', MenuItemSizeListCreateView.as_view(), name='menu_item_size_list_create'),
     path('menu-item-sizes/<int:size_id>/', MenuItemSizeDetailView.as_view(), name='menu_item_size_detail'),
+
+    # MenuItemExtra (Supplements) endpoints
+    path('menu-item-extras/', MenuItemExtraListCreateView.as_view(), name='menu_item_extra_list_create'),
+    path('menu-item-extras/<int:extra_id>/', MenuItemExtraDetailView.as_view(), name='menu_item_extra_detail'),
     
     # Ingredient endpoints
     path('ingredients/', IngredientListCreateView.as_view(), name='ingredient_list_create'),

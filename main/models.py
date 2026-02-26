@@ -133,6 +133,34 @@ class MenuItemSize(models.Model):
         super().save(*args, **kwargs)
 
 
+class MenuItemExtra(models.Model):
+    """Optional paid extras that can be added to a menu item (e.g., extra cheese)."""
+    menu_item = models.ForeignKey(
+        MenuItem,
+        related_name='extras',
+        on_delete=models.CASCADE
+    )
+    name = models.CharField(max_length=100)
+    price = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        help_text="Additional selling price for this extra"
+    )
+    cost_price = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=0.00,
+        help_text="Cost price for this extra (for profit calculation)"
+    )
+
+    class Meta:
+        verbose_name = "Menu Item Extra"
+        verbose_name_plural = "Menu Item Extras"
+
+    def __str__(self):
+        return f"{self.menu_item.name} - {self.name}"
+
+
 
 class Order(models.Model):
     STATUS_CHOICES = [

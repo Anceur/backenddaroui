@@ -1,11 +1,32 @@
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from decimal import Decimal
 from .models import (
-    CustomUser, Profile, Order, MenuItem, MenuItemSize, OrderItem, 
-    Ingredient, MenuItemIngredient, MenuItemSizeIngredient, IngredientStock, IngredientTrace,
-    Table, OfflineOrder, OfflineOrderItem, TableSession, Notification,
-    Supplier, SupplierHistory, SupplierTransactionItem, ClientFidele, Expense, StaffMember, Promotion, PromotionItem,
-    RestaurantInfo
+    CustomUser,
+    Profile,
+    Order,
+    MenuItem,
+    MenuItemSize,
+    MenuItemExtra,
+    OrderItem,
+    Ingredient,
+    MenuItemIngredient,
+    MenuItemSizeIngredient,
+    IngredientStock,
+    IngredientTrace,
+    Table,
+    OfflineOrder,
+    OfflineOrderItem,
+    TableSession,
+    Notification,
+    Supplier,
+    SupplierHistory,
+    SupplierTransactionItem,
+    ClientFidele,
+    Expense,
+    StaffMember,
+    Promotion,
+    PromotionItem,
+    RestaurantInfo,
 )
 from rest_framework import serializers
 
@@ -417,14 +438,24 @@ class MenuItemSizeSerializer(serializers.ModelSerializer):
         if 'cost_price' in validated_data and validated_data.get('cost_price') is None:
             validated_data['cost_price'] = 0.00
         return super().update(instance, validated_data)
-class MenuItemSerializer(serializers.ModelSerializer):
 
+
+class MenuItemExtraSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MenuItemExtra
+        fields = ['id', 'name', 'price', 'cost_price']
+
+
+class MenuItemSerializer(serializers.ModelSerializer):
     image = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    
+    sizes = MenuItemSizeSerializer(many=True, read_only=True)
+    extras = MenuItemExtraSerializer(many=True, read_only=True)
+    cost_price = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, allow_null=True)
+
     class Meta:
         model = MenuItem
-        fields = '__all__'
-    
+        fields = ['id', 'name', 'description', 'price', 'cost_price', 'category', 'image', 'featured', 'sizes', 'extras']
+
     def validate_image(self, value):
         # إذا كان نص (URL)، تحقق أنه رابط صحيح
         if isinstance(value, str):
@@ -432,28 +463,7 @@ class MenuItemSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("رابط صورة غير صالح")
             return value
         return value
-    sizes = MenuItemSizeSerializer(many=True, read_only=True)
-    cost_price = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, allow_null=True)
-    
 
-    class StaffSerializer(serializers.ModelSerializer):
-        image = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-        username = serializers.CharField(source='user.username', read_only=True, required=False)
-    
-    class Meta:
-        model = StaffMember  # ✅ هنا صحيح
-        fields = '__all__'
-    
-    def validate_image(self, value):
-        if isinstance(value, str):
-            if value and not value.startswith('http'):
-                raise serializers.ValidationError("رابط صورة غير صالح")
-            return value
-        return value
-    class Meta:
-        model = MenuItem
-        fields = ['id', 'name', 'description', 'price', 'cost_price', 'category', 'image', 'featured', 'sizes']
-    
     def validate_cost_price(self, value):
         """Ensure cost_price is not negative and defaults to 0.00"""
         if value is None:
@@ -461,27 +471,27 @@ class MenuItemSerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError("Cost price cannot be negative.")
         return value
-    
+
     def create(self, validated_data):
         """Create menu item ensuring cost_price has a value"""
         if 'cost_price' not in validated_data or validated_data.get('cost_price') is None:
             validated_data['cost_price'] = 0.00
         return super().create(validated_data)
-    
+
     def update(self, instance, validated_data):
         """Update menu item ensuring cost_price has a value"""
         if 'cost_price' in validated_data and validated_data.get('cost_price') is None:
             validated_data['cost_price'] = 0.00
         return super().update(instance, validated_data)
-    
+
     def to_representation(self, instance):
         """Convert image to absolute URL"""
         representation = super().to_representation(instance)
-        
+
         # Convert image field to absolute URL if it exists
         if instance.image:
             image_url = instance.image
-            
+
             # If it's already an absolute URL (like Firebase), just return it
             if image_url.startswith('http://') or image_url.startswith('https://'):
                 representation['image'] = image_url
@@ -498,7 +508,7 @@ class MenuItemSerializer(serializers.ModelSerializer):
                     representation['image'] = f"http://localhost:8000{image_url}"
         else:
             representation['image'] = None
-        
+
         return representation
 class OrderItemSerializer(serializers.ModelSerializer):
     item = MenuItemSerializer(read_only=True)

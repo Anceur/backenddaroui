@@ -15,7 +15,17 @@ import hashlib
 import logging
 from django.db import transaction
 
-from .models import Table, TableSession, OfflineOrder, OfflineOrderItem, MenuItem, MenuItemSize, ClientFidele, RestaurantInfo
+from .models import (
+    Table,
+    TableSession,
+    OfflineOrder,
+    OfflineOrderItem,
+    MenuItem,
+    MenuItemSize,
+    MenuItemExtra,
+    ClientFidele,
+    RestaurantInfo,
+)
 from .serializers import (
     TableSessionSerializer, TableSerializer, OfflineOrderSerializer,
     OfflineOrderItemSerializer, MenuItemSerializer
@@ -410,30 +420,42 @@ class TableSessionOrderCreateView(APIView):
                 size_id = item_data.get('size_id')
                 quantity = item_data.get('quantity', 1)
                 item_notes = item_data.get('notes', '')
+                extras_ids = item_data.get('extras', []) or []
                 
                 if not item_id:
                     continue
                 
                 try:
                     menu_item = MenuItem.objects.get(id=item_id)
-                    
-                    # Get price
+
+                    # Get base price
                     if size_id:
                         size = MenuItemSize.objects.get(id=size_id, menu_item=menu_item)
-                        price = size.price
+                        base_price = size.price
                     else:
-                        price = menu_item.price
+                        base_price = menu_item.price
                         size = None
-                    
+
+                    # Calculate extras price (per unit)
+                    extras_qs = MenuItemExtra.objects.filter(
+                        id__in=extras_ids,
+                        menu_item=menu_item
+                    )
+                    extras_list = list(extras_qs)
+                    extras_price = sum((extra.price for extra in extras_list), Decimal('0.00'))
+
+                    price = base_price + extras_price
+
                     item_total = price * quantity
                     total += item_total
-                    
+
                     order_items.append({
                         'item': menu_item,
                         'size': size,
                         'quantity': quantity,
                         'price': price,
-                        'notes': item_notes
+                        'notes': item_notes,
+                        'extras': extras_list,
                     })
                     
                 except (MenuItem.DoesNotExist, MenuItemSize.DoesNotExist) as e:
@@ -472,13 +494,21 @@ class TableSessionOrderCreateView(APIView):
             
             # Create order items linked to the (new or existing) order
             for item_data in order_items:
+                extras = item_data.get('extras') or []
+                notes = item_data.get('notes') or ''
+
+                if extras:
+                    extras_desc = ", ".join([f"{extra.name}" for extra in extras])
+                    extras_text = f"Extras: {extras_desc}"
+                    notes = f"{notes}\n{extras_text}" if notes else extras_text
+
                 OfflineOrderItem.objects.create(
                     offline_order=offline_order,
                     item=item_data['item'],
                     size=item_data['size'],
                     quantity=item_data['quantity'],
                     price=item_data['price'],
-                    notes=item_data['notes']
+                    notes=notes
                 )
 
             # Create notification for cashier/kitchen (Critical)

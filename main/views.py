@@ -8,7 +8,7 @@ from rest_framework.permissions import AllowAny
 from main.firebase_config import get_storage_bucket 
 from .serializers import (
     CustomTokenObtainPairSerializer, ProfileSerializer, UserWithProfileSerializer, 
-    OrderSerializer, MenuItemSerializer, MenuItemSizeSerializer, OrderItemSerializer,
+    OrderSerializer, MenuItemSerializer, MenuItemSizeSerializer, MenuItemExtraSerializer, OrderItemSerializer,
     IngredientSerializer, MenuItemIngredientSerializer, MenuItemSizeIngredientSerializer,
     IngredientStockSerializer, IngredientTraceSerializer, TableSerializer,
     OfflineOrderSerializer, OfflineOrderItemSerializer, TableSessionSerializer,
@@ -28,7 +28,7 @@ from .serializers import UserSerializer
 from django.contrib.auth.hashers import check_password
 from .permissions import IsAdmin, IsChefOrAdmin, IsCashier
 from .models import (
-    Profile, CustomUser, Order, MenuItem, MenuItemSize, OrderItem, 
+    Profile, CustomUser, Order, MenuItem, MenuItemSize, MenuItemExtra, OrderItem, 
     Ingredient, MenuItemIngredient, MenuItemSizeIngredient, IngredientStock, IngredientTrace,
     Table, OfflineOrder, OfflineOrderItem, TableSession,
     Supplier, SupplierHistory, SupplierTransactionItem, ClientFidele, Expense,StaffMember, Promotion, PromotionItem,
@@ -1669,6 +1669,112 @@ class MenuItemSizeDetailView(APIView):
                 'error': 'Failed to delete menu item size',
                 'detail': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# MenuItemExtra Views
+class MenuItemExtraListCreateView(APIView):
+    """View for listing all menu item extras (supplements) and creating new ones"""
+    permission_classes = [IsAuthenticated, IsChefOrAdmin]
+
+    def get(self, request):
+        """Get all menu item extras, optionally filtered by menu_item"""
+        try:
+            menu_item_id = request.query_params.get('menu_item', None)
+            if menu_item_id:
+                extras = MenuItemExtra.objects.filter(menu_item_id=menu_item_id)
+            else:
+                extras = MenuItemExtra.objects.all().select_related('menu_item')
+            serializer = MenuItemExtraSerializer(extras, many=True)
+            # Enrich with menu_item info
+            data = serializer.data
+            for i, extra in enumerate(extras):
+                data[i]['menu_item_id'] = extra.menu_item_id
+                data[i]['menu_item_name'] = extra.menu_item.name
+            return Response(data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({
+                'error': 'Failed to retrieve menu item extras',
+                'detail': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        """Create a new menu item extra (supplement)"""
+        try:
+            menu_item_id = request.data.get('menu_item_id')
+            if not menu_item_id:
+                return Response({
+                    'error': 'menu_item_id is required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                menu_item = MenuItem.objects.get(id=menu_item_id)
+            except MenuItem.DoesNotExist:
+                return Response({
+                    'error': 'Menu item not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            serializer = MenuItemExtraSerializer(data=request.data)
+            if serializer.is_valid():
+                extra = serializer.save(menu_item=menu_item)
+                response_data = MenuItemExtraSerializer(extra).data
+                response_data['menu_item_id'] = extra.menu_item_id
+                response_data['menu_item_name'] = extra.menu_item.name
+                return Response(response_data, status=status.HTTP_201_CREATED)
+            return Response({
+                'error': 'Validation failed',
+                'details': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                'error': 'Failed to create menu item extra',
+                'detail': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class MenuItemExtraDetailView(APIView):
+    """View for retrieving, updating, or deleting a specific menu item extra"""
+    permission_classes = [IsAuthenticated, IsAdmin]
+
+    def get(self, request, extra_id):
+        """Get a specific menu item extra by ID"""
+        try:
+            extra = MenuItemExtra.objects.select_related('menu_item').get(id=extra_id)
+            serializer = MenuItemExtraSerializer(extra)
+            data = serializer.data
+            data['menu_item_id'] = extra.menu_item_id
+            data['menu_item_name'] = extra.menu_item.name
+            return Response(data, status=status.HTTP_200_OK)
+        except MenuItemExtra.DoesNotExist:
+            return Response({'error': 'Extra not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': 'Failed to retrieve extra', 'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def patch(self, request, extra_id):
+        """Partial update of a menu item extra"""
+        try:
+            extra = MenuItemExtra.objects.get(id=extra_id)
+            serializer = MenuItemExtraSerializer(extra, data=request.data, partial=True)
+            if serializer.is_valid():
+                extra = serializer.save()
+                data = MenuItemExtraSerializer(extra).data
+                data['menu_item_id'] = extra.menu_item_id
+                data['menu_item_name'] = extra.menu_item.name
+                return Response(data, status=status.HTTP_200_OK)
+            return Response({'error': 'Validation failed', 'details': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        except MenuItemExtra.DoesNotExist:
+            return Response({'error': 'Extra not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': 'Failed to update extra', 'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def delete(self, request, extra_id):
+        """Delete a menu item extra"""
+        try:
+            extra = MenuItemExtra.objects.get(id=extra_id)
+            extra.delete()
+            return Response({'message': 'Extra deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
+        except MenuItemExtra.DoesNotExist:
+            return Response({'error': 'Extra not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': 'Failed to delete extra', 'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 # OrderItem Views
 class OrderItemListCreateView(APIView):
