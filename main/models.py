@@ -78,6 +78,8 @@ class MenuItem(models.Model):
         ('tacos', 'Tacos'),
         ('desserts', 'Desserts'),
         ('drinks', 'Drinks'),
+        ('cafeteria','Cafeteria'),
+        ('crepes','Crepes')
     ]
 
     name = models.CharField(max_length=100)
