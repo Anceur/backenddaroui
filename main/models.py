@@ -80,8 +80,8 @@ class MenuItem(models.Model):
         ('drinks', 'Drinks'),
 
         ('cafétéria', 'Cafétéria'),
-        ('desserts', 'Desserts'),
-        ('drinks', 'Drinks'),
+        ('crêpes', 'Crêpes'),
+        ('entrées', 'Entrées'),
         
     ]
 
