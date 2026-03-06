@@ -3665,6 +3665,166 @@ class CashierOrderDetailView(APIView):
                 'detail': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @transaction.atomic
+    def patch(self, request):
+        """Update order items and details before confirmation"""
+        try:
+            order_type = request.data.get('order_type')
+            order_id = request.data.get('order_id')
+            items_data = request.data.get('items') # Expecting list of {item_id, size_id, quantity, notes}
+            notes = request.data.get('notes')
+            
+            if not order_type or not order_id:
+                return Response({
+                    'error': 'order_type and order_id are required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Clean order_id
+            if isinstance(order_id, str):
+                order_id = order_id.replace('#', '').strip()
+            try:
+                order_id = int(order_id)
+            except (ValueError, TypeError):
+                return Response({
+                    'error': 'Invalid order ID'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if order_type == 'offline':
+                try:
+                    order = OfflineOrder.objects.get(id=order_id)
+                except OfflineOrder.DoesNotExist:
+                    return Response({'error': 'Offline Order not found'}, status=status.HTTP_404_NOT_FOUND)
+                item_model = OfflineOrderItem
+                order_field = 'offline_order'
+            elif order_type == 'online':
+                try:
+                    order = Order.objects.get(id=order_id)
+                except Order.DoesNotExist:
+                    return Response({'error': 'Online Order not found'}, status=status.HTTP_404_NOT_FOUND)
+                item_model = OrderItem
+                order_field = 'order'
+            else:
+                return Response({'error': 'Invalid order type'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Update order notes if provided
+            if notes is not None:
+                order.notes = notes
+
+            # Update items if provided
+            if items_data is not None:
+                # Delete existing items
+                item_model.objects.filter(**{order_field: order}).delete()
+                
+                total = Decimal('0.00')
+                revenue = Decimal('0.00')
+                json_items = [] # For online order JSONField compatibility
+                
+                for item_data in items_data:
+                    item_id = item_data.get('item_id')
+                    size_id = item_data.get('size_id')
+                    quantity = int(item_data.get('quantity', 1))
+                    item_notes = item_data.get('notes', '')
+                    
+                    try:
+                        menu_item = MenuItem.objects.get(id=item_id)
+                        item_price = menu_item.price
+                        cost_price = menu_item.cost_price or Decimal('0.00')
+                        size_name = None
+                        
+                        if size_id:
+                            try:
+                                menu_item_size = MenuItemSize.objects.get(id=size_id, menu_item=menu_item)
+                                item_price = menu_item_size.price
+                                cost_price = menu_item_size.cost_price or Decimal('0.00')
+                                size_name = menu_item_size.size
+                            except MenuItemSize.DoesNotExist:
+                                pass
+                        
+                        # Handle extras
+                        extras_payload = item_data.get('extras', [])
+                        item_extras = []
+                        extras_total_price = Decimal('0.00')
+                        
+                        for extra_data in extras_payload:
+                            extra_id = extra_data.get('id')
+                            if extra_id:
+                                try:
+                                    extra_obj = MenuItemExtra.objects.get(id=extra_id)
+                                    item_extras.append({
+                                        'id': extra_obj.id,
+                                        'name': extra_obj.name,
+                                        'price': str(extra_obj.price)
+                                    })
+                                    extras_total_price += extra_obj.price
+                                except MenuItemExtra.DoesNotExist:
+                                    pass
+                            elif 'name' in extra_data and 'price' in extra_data:
+                                item_extras.append({
+                                    'name': extra_data['name'],
+                                    'price': str(extra_data['price'])
+                                })
+                                extras_total_price += Decimal(str(extra_data['price']))
+
+                        # Create the item link
+                        if order_type == 'offline':
+                            OfflineOrderItem.objects.create(
+                                offline_order=order,
+                                item=menu_item,
+                                size_id=size_id,
+                                quantity=quantity,
+                                price=item_price,
+                                notes=item_notes,
+                                extras=item_extras
+                            )
+                        else:
+                            OrderItem.objects.create(
+                                order=order,
+                                item=menu_item,
+                                size_id=size_id,
+                                quantity=quantity,
+                                price=item_price,
+                                extras=item_extras
+                            )
+                            # Online order JSONField summary (legacy support if needed)
+                            size_suffix = f" ({size_name})" if size_name else ""
+                            extra_names = ", ".join([e['name'] for e in item_extras])
+                            extra_suffix = f" (+{extra_names})" if extra_names else ""
+                            json_items.append(f"{menu_item.name}{size_suffix}{extra_suffix} x{quantity}")
+
+                        total += (item_price + extras_total_price) * quantity
+                        revenue += (item_price - cost_price + extras_total_price) * quantity
+                    except MenuItem.DoesNotExist:
+                        continue
+
+                # Update order totals
+                if order_type == 'online':
+                    order.items = json_items
+                    order.subtotal = total
+                    order.total = total + (order.tax_amount or Decimal('100.00'))
+                else:
+                    order.total = total
+                
+                order.revenue = revenue
+            
+            order.save()
+            
+            # Return updated order data
+            if order_type == 'online':
+                serializer = OrderSerializer(order)
+            else:
+                serializer = OfflineOrderSerializer(order)
+                
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'error': 'Failed to update order details',
+                'detail': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 
 class OrderTicketPrintView(APIView):
     """View for printing order ticket"""
@@ -3918,8 +4078,36 @@ class CashierCreateOfflineOrderView(APIView):
                             # Fallback to DB price which is already set in item_price
 
                     # Calculate totals
-                    line_total = item_price * quantity
-                    line_revenue = (item_price - cost_price) * quantity
+                    # Handle extras
+                    extras_payload = item_data.get('extras', [])
+                    item_extras = []
+                    extras_total_price = Decimal('0.00')
+                    
+                    for extra_data in extras_payload:
+                        extra_id = extra_data.get('id')
+                        # We can either trust the payload or fetch from DB
+                        # For now, let's trust name/price if provided, otherwise fetch by ID
+                        if extra_id:
+                            try:
+                                extra_obj = MenuItemExtra.objects.get(id=extra_id)
+                                item_extras.append({
+                                    'id': extra_obj.id,
+                                    'name': extra_obj.name,
+                                    'price': str(extra_obj.price)
+                                })
+                                extras_total_price += extra_obj.price
+                            except MenuItemExtra.DoesNotExist:
+                                logger.warning(f"MenuItemExtra {extra_id} not found")
+                        elif 'name' in extra_data and 'price' in extra_data:
+                            # Manual extra
+                            item_extras.append({
+                                'name': extra_data['name'],
+                                'price': str(extra_data['price'])
+                            })
+                            extras_total_price += Decimal(str(extra_data['price']))
+
+                    line_total = (item_price + extras_total_price) * quantity
+                    line_revenue = (item_price - cost_price + extras_total_price) * quantity # Assuming extras have 0 cost or same cost as price?
                     
                     new_items_total += line_total
                     new_items_revenue += line_revenue
@@ -3930,7 +4118,8 @@ class CashierCreateOfflineOrderView(APIView):
                         item=menu_item,
                         size=menu_item_size,
                         quantity=quantity,
-                        price=item_price
+                        price=item_price, # Base price
+                        extras=item_extras
                     )
                     created_count += 1
                     

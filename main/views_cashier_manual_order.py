@@ -129,8 +129,34 @@ class CashierManualOrderCreateView(APIView):
                         item_cost = menu_item.cost_price
                         size_str = ""
                     
-                    item_subtotal = item_price * quantity
-                    item_revenue = (item_price - (item_cost or 0)) * quantity
+                    # Handle extras
+                    extras_payload = item_data.get('extras', [])
+                    item_extras = []
+                    extras_total_price = Decimal('0.00')
+                    
+                    for extra_data in extras_payload:
+                        extra_id = extra_data.get('id')
+                        if extra_id:
+                            try:
+                                from .models import MenuItemExtra
+                                extra_obj = MenuItemExtra.objects.get(id=extra_id)
+                                item_extras.append({
+                                    'id': extra_obj.id,
+                                    'name': extra_obj.name,
+                                    'price': str(extra_obj.price)
+                                })
+                                extras_total_price += extra_obj.price
+                            except MenuItemExtra.DoesNotExist:
+                                pass
+                        elif 'name' in extra_data and 'price' in extra_data:
+                            item_extras.append({
+                                'name': extra_data['name'],
+                                'price': str(extra_data['price'])
+                            })
+                            extras_total_price += Decimal(str(extra_data['price']))
+
+                    item_subtotal = (item_price + extras_total_price) * quantity
+                    item_revenue = (item_price - (item_cost or 0) + extras_total_price) * quantity
                     
                     subtotal += item_subtotal
                     revenue += item_revenue
@@ -140,7 +166,8 @@ class CashierManualOrderCreateView(APIView):
                         'name': menu_item.name,
                         'size': size.size if size else None,
                         'quantity': quantity,
-                        'price': float(item_price)
+                        'price': float(item_price + extras_total_price),
+                        'extras': item_extras
                     })
                     
                     # Prepare OrderItem data
@@ -148,7 +175,8 @@ class CashierManualOrderCreateView(APIView):
                         'menu_item': menu_item,
                         'size': size,
                         'quantity': quantity,
-                        'price': item_price
+                        'price': item_price,
+                        'extras': item_extras
                     })
                     
                 except MenuItem.DoesNotExist:
@@ -199,7 +227,9 @@ class CashierManualOrderCreateView(APIView):
                     order=order,
                     item=order_item_data['menu_item'],
                     size=order_item_data['size'],
-                    quantity=order_item_data['quantity']
+                    quantity=order_item_data['quantity'],
+                    price=order_item_data['price'],
+                    extras=order_item_data['extras']
                 )
             
             logger.info(f"Cashier {request.user.email} created manual Order #{order.id} for {order.customer}")

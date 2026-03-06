@@ -352,10 +352,13 @@ class OrderSerializer(serializers.ModelSerializer):
                 price = str(item.size.price if item.size else (item.item.price if item.item else "0.00"))
                 
                 rich_items.append({
+                    'item_id': item.item.id if item.item else None,
+                    'size_id': item.size.id if item.size else None,
                     'name': item_name,
                     'quantity': item.quantity,
                     'price': price,
-                    'size': size_name
+                    'size': size_name,
+                    'extras': item.extras
                 })
             # Overwrite representation items with better structured data
             representation['items'] = rich_items
@@ -526,7 +529,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrderItem
-        fields = ['id', 'item', 'size', 'quantity', 'item_id', 'size_id', 'order_id', 'order']
+        fields = ['id', 'item', 'size', 'quantity', 'price', 'extras', 'item_id', 'size_id', 'order_id', 'order']
         read_only_fields = ['id', 'order']
         extra_kwargs = {
             'order': {'read_only': True}
@@ -809,7 +812,7 @@ class OfflineOrderItemSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = OfflineOrderItem
-        fields = ['id', 'item', 'size', 'quantity', 'price', 'notes', 'item_id', 'size_id']
+        fields = ['id', 'item', 'size', 'quantity', 'price', 'notes', 'item_id', 'size_id', 'extras']
         read_only_fields = ['id']
 
 

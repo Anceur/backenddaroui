@@ -78,8 +78,9 @@ class MenuItem(models.Model):
         ('tacos', 'Tacos'),
         ('desserts', 'Desserts'),
         ('drinks', 'Drinks'),
-        ('cafeteria','Cafeteria'),
-        ('crepes','Crepes')
+        ('cafétéria', 'Cafétéria'),
+        ('crêpes', 'Crêpes'),
+        ('entrées', 'Entrées'),
     ]
 
     name = models.CharField(max_length=100)
@@ -210,6 +211,8 @@ class OrderItem(models.Model):
     item = models.ForeignKey(MenuItem, on_delete=models.CASCADE)
     size = models.ForeignKey(MenuItemSize, null=True, blank=True, on_delete=models.SET_NULL)
     quantity = models.PositiveIntegerField(default=1)
+    price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    extras = models.JSONField(default=list, blank=True, null=True, help_text="Selected paid extras (id, name, price)")
 
     def __str__(self):
         size_info = f" - {self.size.size}" if self.size else ""
@@ -632,6 +635,7 @@ class OfflineOrderItem(models.Model):
     quantity = models.PositiveIntegerField(default=1)
     price = models.DecimalField(max_digits=10, decimal_places=2, help_text="Price at time of order")
     notes = models.CharField(max_length=255, blank=True, help_text="Special instructions for this item")
+    extras = models.JSONField(default=list, blank=True, null=True, help_text="Selected paid extras (id, name, price)")
     
     class Meta:
         verbose_name = "Offline Order Item"
